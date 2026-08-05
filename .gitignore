@@ -1,0 +1,53 @@
+﻿# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build and Output directories
+dist/
+build/
+.output/
+.tanstack/
+.nitro/
+.vite/
+
+# Database & SQLite files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-journal
+backend/prisma/dev.db
+backend/prisma/dev.db-journal
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.log
+
+# Editor and OS generated files
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Temporary / Cache directories
+.cache/
+.temp/
+tmp/
+scratch/
