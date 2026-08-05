@@ -1,10 +1,28 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEventHandler, type InputHTMLAttributes } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Package, Upload, Factory, ClipboardList, Settings, ArrowLeft,
-  UploadCloud, CheckCircle2, Pencil, Eye, Search,
+  Package,
+  Upload,
+  Factory,
+  ClipboardList,
+  Settings,
+  ArrowLeft,
+  UploadCloud,
+  Pencil,
+  Eye,
+  Search,
+  X,
+  Mail,
+  Phone,
+  ChevronDown,
+  ChevronUp,
+  Globe,
+  FileText,
+  Loader2,
 } from "lucide-react";
 import { CorefLogo } from "@/components/coref/Logo";
+import { apiFetch, apiUrl } from "@/lib/api";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -19,6 +37,137 @@ export const Route = createFileRoute("/admin")({
 
 type Nav = "catalogue" | "upload" | "suppliers" | "enquiries" | "settings";
 
+type Product = {
+  id: number;
+  name: string;
+  category: string;
+  supplier: string;
+  fobPrice: string;
+  leadTime?: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ProductCreateInput = Omit<Product, "id" | "createdAt" | "updatedAt">;
+
+type Enquiry = {
+  id: number;
+  reference: string;
+  name: string;
+  company: string;
+  role: string;
+  items: string;
+  message: string;
+  submittedAt: string;
+  status: string;
+  email?: string;
+  phone?: string;
+};
+
+type UploadRow = {
+  id: number;
+  name: string;
+  category: string;
+  supplier: string;
+  fobPrice: string;
+  leadTime: string;
+  status: string;
+};
+
+type PdfSuggestion = {
+  name: string;
+  category: string;
+  supplier?: string;
+  fobPrice?: string;
+  leadTime?: string;
+};
+
+// ─── Status badge helpers ──────────────────────────────────────────────────────
+const PRODUCT_STATUS_STYLES: Record<string, string> = {
+  Published: "bg-green/15 text-green",
+  Draft: "bg-secondary text-navy",
+  "Needs Review": "bg-gold/20 text-gold",
+};
+
+const ENQUIRY_STATUS_STYLES: Record<string, string> = {
+  New: "bg-gold/20 text-gold",
+  "In Progress": "bg-ocean/20 text-navy",
+  Quoted: "bg-green/15 text-green",
+  Closed: "bg-secondary text-mutedink",
+};
+
+// ─── Product View Modal ────────────────────────────────────────────────────────
+function ProductViewModal({ product, onClose }: { product: Product; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-lg rounded-2xl bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between border-b border-border p-6">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-mutedink">Product Details</p>
+            <h2 className="mt-1 font-display text-xl font-extrabold text-navy leading-tight">{product.name}</h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="ml-4 rounded-md p-1.5 text-mutedink hover:bg-offwhite hover:text-navy"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="grid grid-cols-2 gap-4 p-6">
+          <DetailRow label="Category" value={product.category} />
+          <DetailRow label="Supplier" value={product.supplier} />
+          <DetailRow label="FOB Price" value={product.fobPrice} mono />
+          <DetailRow label="Lead Time" value={product.leadTime || "—"} />
+          <div className="col-span-2 flex items-center gap-3">
+            <span className="text-xs font-semibold uppercase tracking-wider text-mutedink">Status</span>
+            <span className={`rounded px-2.5 py-1 text-xs font-semibold ${PRODUCT_STATUS_STYLES[product.status] ?? "bg-secondary text-navy"}`}>
+              {product.status}
+            </span>
+          </div>
+          <div className="col-span-2 border-t border-border pt-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-mutedink">Created</p>
+            <p className="mt-1 font-mono-data text-xs text-charcoal">{new Date(product.createdAt).toLocaleString()}</p>
+          </div>
+          <div className="col-span-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-mutedink">Last Updated</p>
+            <p className="mt-1 font-mono-data text-xs text-charcoal">{new Date(product.updatedAt).toLocaleString()}</p>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-border px-6 py-4">
+          <button
+            onClick={onClose}
+            className="w-full rounded-md bg-navy py-2.5 text-sm font-semibold text-white hover:bg-[#1A5491]"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wider text-mutedink">{label}</p>
+      <p className={`mt-1 text-sm text-navy ${mono ? "font-mono-data" : ""}`}>{value}</p>
+    </div>
+  );
+}
+
+// ─── Admin App Shell ───────────────────────────────────────────────────────────
 function AdminApp() {
   const [authed, setAuthed] = useState(false);
   const [nav, setNav] = useState<Nav>("upload");
@@ -55,8 +204,7 @@ function AdminApp() {
               onClick={() => setNav(key)}
               className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors ${
                 nav === key ? "bg-white/15 font-semibold" : "text-white/75 hover:bg-white/10 hover:text-white"
-              }`}
-            >
+              }`}>
               <Icon className="h-4 w-4" />
               {label}
             </button>
@@ -85,11 +233,15 @@ function AdminApp() {
   );
 }
 
+// ─── Login ─────────────────────────────────────────────────────────────────────
 function Login({ onSubmit }: { onSubmit: () => void }) {
   return (
     <div className="grid min-h-screen place-items-center bg-navy px-4">
       <form
-        onSubmit={(e) => { e.preventDefault(); onSubmit(); }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit();
+        }}
         className="w-full max-w-sm rounded-xl bg-white p-8 shadow-2xl"
       >
         <div className="mb-6 flex justify-center"><CorefLogo /></div>
@@ -99,11 +251,7 @@ function Login({ onSubmit }: { onSubmit: () => void }) {
           <input type="email" required defaultValue="admin@coref.in" className="w-full rounded-md border border-input bg-offwhite px-3 py-2.5 text-sm outline-none focus:border-ocean" placeholder="Email" />
           <input type="password" required defaultValue="demo1234" className="w-full rounded-md border border-input bg-offwhite px-3 py-2.5 text-sm outline-none focus:border-ocean" placeholder="Password" />
         </div>
-        <button
-          type="button"
-          onClick={onSubmit}
-          className="mt-6 w-full rounded-md bg-navy py-2.5 text-sm font-semibold text-white hover:bg-[#1A5491]"
-        >
+        <button type="button" onClick={onSubmit} className="mt-6 w-full rounded-md bg-navy py-2.5 text-sm font-semibold text-white hover:bg-[#1A5491]">
           Sign In
         </button>
         <p className="mt-3 text-center text-[10px] text-mutedink">Demo: any credentials work</p>
@@ -112,112 +260,162 @@ function Login({ onSubmit }: { onSubmit: () => void }) {
   );
 }
 
-type ExtractedProduct = {
-  id: number; name: string; category: string; spec: string;
-  price: string; lead: string; ready: boolean; published?: boolean;
-};
-
-const MOCK_EXTRACTED: ExtractedProduct[] = [
-  { id: 1, name: "Marble Look Porcelain — Calacatta", category: "Tiles & Flooring", spec: "600×1200mm · Matt · Porcelain", price: "₹48–68", lead: "6–8 weeks", ready: true },
-  { id: 2, name: "Marble Look Porcelain — Statuario", category: "Tiles & Flooring", spec: "600×1200mm · Glossy · Porcelain", price: "₹52–72", lead: "6–8 weeks", ready: true },
-  { id: 3, name: "Wood Look Plank Tile — Oak", category: "Tiles & Flooring", spec: "200×1200mm · Matt · Porcelain", price: "₹62–84", lead: "8–10 weeks", ready: true },
-  { id: 4, name: "Terrazzo Look Tile — Grey", category: "Tiles & Flooring", spec: "600×600mm · Honed · Porcelain", price: "₹55–75", lead: "6–8 weeks", ready: true },
-  { id: 5, name: "Concrete Look Tile — Industrial", category: "Tiles & Flooring", spec: "600×600mm · Matt · Porcelain", price: "₹45–62", lead: "6–8 weeks", ready: true },
-  { id: 6, name: "Mosaic Hexagon — Carrara", category: "Tiles & Flooring", spec: "Hexagonal · 100mm · Marble", price: "₹120–165", lead: "8–12 weeks", ready: false },
-  { id: 7, name: "Subway Tile — Gloss White", category: "Tiles & Flooring", spec: "75×150mm · Glossy · Ceramic", price: "₹28–38", lead: "4–6 weeks", ready: true },
-  { id: 8, name: "Outdoor Anti-Skid — Slate Grey", category: "Tiles & Flooring", spec: "300×600mm · R11 · Porcelain", price: "₹58–78", lead: "6–8 weeks", ready: true },
-  { id: 9, name: "Bathroom Wall Tile — Beige", category: "Tiles & Flooring", spec: "300×600mm · Glossy · Ceramic", price: "₹32–44", lead: "4–6 weeks", ready: true },
-  { id: 10, name: "Large Format Slab — Onyx", category: "Tiles & Flooring", spec: "1200×2400mm · Polished · Porcelain", price: "₹220–310", lead: "10–12 weeks", ready: false },
-  { id: 11, name: "Mosaic Penny Round — Black", category: "Tiles & Flooring", spec: "20mm round · Matt · Porcelain", price: "₹95–130", lead: "6–8 weeks", ready: true },
-  { id: 12, name: "Pool Tile — Aqua Blue", category: "Tiles & Flooring", spec: "240×115mm · Glossy · Porcelain", price: "₹85–112", lead: "8–10 weeks", ready: true },
-];
-
+// ─── Upload Catalogue Page ─────────────────────────────────────────────────────
 function UploadPage() {
-  const [stage, setStage] = useState<"idle" | "processing" | "review">("idle");
-  const [progress, setProgress] = useState(0);
-  const [statusIdx, setStatusIdx] = useState(0);
-  const [rows, setRows] = useState<ExtractedProduct[]>(MOCK_EXTRACTED);
-  const [selected, setSelected] = useState<Set<number>>(new Set(MOCK_EXTRACTED.map((r) => r.id)));
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [stage, setStage] = useState<"idle" | "uploading" | "review">("idle");
+  const [rows, setRows] = useState<UploadRow[]>([]);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
-  const statuses = [
-    "Reading PDF pages...",
-    "Identifying product entries...",
-    "Extracting specifications...",
-    "Parsing pricing and dimensions...",
-    "Generating product listings...",
-    "Done! 12 products extracted.",
-  ];
-
-  const startProcessing = () => {
-    setStage("processing");
-    setProgress(0);
-    setStatusIdx(0);
-    const total = 3000;
-    const tickMs = 50;
-    let elapsed = 0;
-    const interval = setInterval(() => {
-      elapsed += tickMs;
-      setProgress(Math.min(100, (elapsed / total) * 100));
-      setStatusIdx(Math.min(statuses.length - 1, Math.floor((elapsed / total) * statuses.length)));
-      if (elapsed >= total) {
-        clearInterval(interval);
-        setTimeout(() => setStage("review"), 400);
+  const uploadMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedFile) throw new Error("Please select a PDF file.");
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      const response = await fetch(apiUrl("/api/upload/pdf"), { method: "POST", body: formData });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || "Upload failed.");
       }
-    }, tickMs);
+      return response.json() as Promise<{ suggestions: PdfSuggestion[] }>;
+    },
+    onMutate: () => {
+      setStage("uploading");
+      setError(null);
+    },
+    onSuccess: (data) => {
+      const nextRows = data.suggestions.map((suggestion, index) => ({
+        id: index + 1,
+        name: suggestion.name,
+        category: suggestion.category,
+        supplier: suggestion.supplier ?? "",
+        fobPrice: suggestion.fobPrice ?? "",
+        leadTime: suggestion.leadTime ?? "",
+        status: "Draft",
+      }));
+      setRows(nextRows);
+      setSelected(new Set(nextRows.map((row) => row.id)));
+      setStage("review");
+    },
+    onError: (err) => {
+      setError((err as Error).message || "Upload failed.");
+      setStage("idle");
+    },
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async ({ products, status }: { products: ProductCreateInput[]; status: string }) => {
+      await Promise.all(
+        products.map((product) =>
+          apiFetch<Product>("/api/products", { method: "POST", body: JSON.stringify({ ...product, status }) })
+        )
+      );
+    },
+    onSuccess: (_, { status }) => {
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      setToast(status === "Published" ? "Selected products published to catalogue." : "Selected products saved as Draft.");
+      setTimeout(() => setToast(null), 3500);
+    },
+    onError: () => {
+      setToast("Unable to save products. Please try again.");
+      setTimeout(() => setToast(null), 3000);
+    },
+  });
+
+  const handleFileChange = (file: File | null) => {
+    setSelectedFile(file);
+    setError(null);
   };
 
-  const toggle = (id: number) => {
-    setSelected((s) => {
-      const n = new Set(s);
-      if (n.has(id)) n.delete(id); else n.add(id);
-      return n;
+  const buildPayload = (status: string) => {
+    const selectedRows = rows.filter((row) => selected.has(row.id));
+    return selectedRows.map((row) => ({
+      name: row.name,
+      category: row.category,
+      supplier: row.supplier || "Unknown Supplier",
+      fobPrice: row.fobPrice || "TBD",
+      leadTime: row.leadTime || undefined,
+      status,
+    }));
+  };
+
+  const handlePublish = () => {
+    const payload = buildPayload("Published");
+    if (payload.length === 0) {
+      setToast("Select at least one item before publishing.");
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
+    saveMutation.mutate({ products: payload, status: "Published" });
+  };
+
+  const handleSaveAsDraft = () => {
+    const payload = buildPayload("Draft");
+    if (payload.length === 0) {
+      setToast("Select at least one item to save.");
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
+    saveMutation.mutate({ products: payload, status: "Draft" });
+  };
+
+  const handleRowChange = (id: number, field: keyof UploadRow, value: string) => {
+    setRows((current) => current.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
+  };
+
+  const toggleItem = (id: number) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
-  };
-
-  const publish = () => {
-    setRows((rs) => rs.map((r) => (selected.has(r.id) ? { ...r, published: true } : r)));
-    setToast(`✓ ${selected.size} products added to live catalogue`);
-    setTimeout(() => setToast(null), 3000);
   };
 
   return (
     <div>
       <h1 className="font-display text-2xl font-extrabold text-navy">Upload Supplier Catalogue</h1>
-      <p className="mt-1 text-sm text-mutedink">
-        Upload a supplier's PDF catalogue. Coref's system reads it automatically and extracts individual products into the catalogue.
-      </p>
+      <p className="mt-1 text-sm text-mutedink">Upload a supplier PDF and review the extracted product suggestions before publishing them.</p>
 
       {stage === "idle" && (
         <div className="mt-8 max-w-3xl space-y-6">
           <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-ocean/50 bg-white px-6 py-14 text-center hover:border-ocean">
-            <input type="file" accept="application/pdf" className="hidden" />
+            <input type="file" accept="application/pdf" className="hidden" onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)} />
             <UploadCloud className="h-12 w-12 text-navy" />
             <div className="mt-4 font-display text-base font-bold text-navy">Drag & drop a supplier PDF catalogue here</div>
             <div className="mt-1 text-xs text-mutedink">or click to browse · PDF only · max 50MB</div>
+            {selectedFile && <div className="mt-3 text-xs font-semibold text-ocean">{selectedFile.name}</div>}
             <span className="mt-4 rounded-md border border-navy px-4 py-2 text-xs font-semibold text-navy">Browse File</span>
           </label>
 
           <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="Supplier Name" placeholder="Guangdong Elite Ceramics" />
-            <SelectField label="Product Category" options={["Tiles & Flooring", "Sanitaryware", "Machinery", "Surface Finishes", "Structural", "Lighting", "Other"]} />
+            <Field label="Supplier Name" placeholder="Guangdong Elite Ceramics" readOnly value="" />
+            <SelectField label="Default Category" options={["Tiles & Flooring", "Sanitaryware", "Machinery", "Surface Finishes", "Structural", "Lighting", "Other"]} value="Tiles & Flooring" onChange={() => undefined} />
             <Field label="Default Origin" defaultValue="🇨🇳 China" readOnly />
           </div>
 
-          <button onClick={startProcessing} className="rounded-md bg-navy px-6 py-3 text-sm font-semibold text-white hover:bg-[#1A5491]">
-            Upload & Extract →
+          {error && <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+
+          <button type="button" disabled={uploadMutation.isPending} onClick={() => uploadMutation.mutate()} className="rounded-md bg-navy px-6 py-3 text-sm font-semibold text-white hover:bg-[#1A5491] disabled:cursor-not-allowed disabled:opacity-60">
+            {uploadMutation.isPending ? "Uploading…" : "Upload & Extract →"}
           </button>
         </div>
       )}
 
-      {stage === "processing" && (
+      {stage === "uploading" && (
         <div className="mt-10 max-w-2xl rounded-xl border border-border bg-white p-10 text-center">
-          <div className="font-display text-lg font-bold text-navy">Processing catalogue…</div>
+          <Loader2 className="mx-auto h-10 w-10 animate-spin text-navy" />
+          <div className="mt-4 font-display text-lg font-bold text-navy">Extracting products from PDF…</div>
           <div className="mt-6 h-2 w-full overflow-hidden rounded-full bg-offwhite">
-            <div className="h-full bg-ocean transition-[width] duration-150" style={{ width: `${progress}%` }} />
+            <div className="h-full w-full bg-gradient-to-r from-ocean to-navy animate-pulse" />
           </div>
-          <div className="mt-4 font-mono-data text-xs text-mutedink">{progress.toFixed(0)}%</div>
-          <div className="mt-6 text-sm text-charcoal">{statuses[statusIdx]}</div>
+          <div className="mt-4 text-sm text-charcoal">Reading document text. If this is a scanned PDF, OCR will run automatically — this may take up to 30 seconds.</div>
+          <div className="mt-3 flex items-center justify-center gap-2 text-xs text-mutedink">
+            <FileText className="h-3.5 w-3.5" /> Hybrid OCR engine active
+          </div>
         </div>
       )}
 
@@ -225,8 +423,8 @@ function UploadPage() {
         <div className="mt-8">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h2 className="font-display text-xl font-extrabold text-navy">12 products extracted — review before publishing</h2>
-              <p className="mt-1 text-sm text-mutedink">Each product has been auto-filled. Edit any field before adding to the live catalogue.</p>
+              <h2 className="font-display text-xl font-extrabold text-navy">Review extracted products</h2>
+              <p className="mt-1 text-sm text-mutedink">Edit fields before publishing them to the live catalogue.</p>
             </div>
             <div className="text-xs font-mono-data text-mutedink">{selected.size} of {rows.length} selected</div>
           </div>
@@ -236,35 +434,25 @@ function UploadPage() {
               <table className="w-full text-left text-xs">
                 <thead className="bg-offwhite text-mutedink">
                   <tr>
-                    <th className="px-3 py-2"><input type="checkbox" checked={selected.size === rows.length} onChange={(e) => setSelected(new Set(e.target.checked ? rows.map((r) => r.id) : []))} /></th>
-                    <th className="px-3 py-2">Image</th>
+                    <th className="px-3 py-2"><input type="checkbox" checked={rows.length > 0 && selected.size === rows.length} onChange={(event) => setSelected(event.target.checked ? new Set(rows.map((row) => row.id)) : new Set())} /></th>
                     <th className="px-3 py-2">Product Name</th>
                     <th className="px-3 py-2">Category</th>
-                    <th className="px-3 py-2">Spec</th>
+                    <th className="px-3 py-2">Supplier</th>
                     <th className="px-3 py-2">FOB Price</th>
                     <th className="px-3 py-2">Lead Time</th>
                     <th className="px-3 py-2">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.id} className="border-t border-border align-middle">
-                      <td className="px-3 py-2"><input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} /></td>
-                      <td className="px-3 py-2"><div className="h-10 w-10 rounded bg-offwhite" /></td>
-                      <td className="px-3 py-2"><input defaultValue={r.name} className="w-56 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
-                      <td className="px-3 py-2"><input defaultValue={r.category} className="w-36 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
-                      <td className="px-3 py-2"><input defaultValue={r.spec} className="w-56 rounded border border-transparent bg-transparent px-2 py-1 font-mono-data text-[11px] hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
-                      <td className="px-3 py-2"><input defaultValue={r.price} className="w-24 rounded border border-transparent bg-transparent px-2 py-1 font-mono-data hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
-                      <td className="px-3 py-2"><input defaultValue={r.lead} className="w-24 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
-                      <td className="px-3 py-2">
-                        {r.published ? (
-                          <span className="inline-flex items-center gap-1 rounded bg-green/15 px-2 py-0.5 text-[10px] font-semibold text-green"><CheckCircle2 className="h-3 w-3" />Published</span>
-                        ) : r.ready ? (
-                          <span className="rounded bg-green/15 px-2 py-0.5 text-[10px] font-semibold text-green">Ready to Publish</span>
-                        ) : (
-                          <span className="rounded bg-gold/20 px-2 py-0.5 text-[10px] font-semibold text-gold">Needs Review</span>
-                        )}
-                      </td>
+                  {rows.map((row) => (
+                    <tr key={row.id} className="border-t border-border align-middle">
+                      <td className="px-3 py-2"><input type="checkbox" checked={selected.has(row.id)} onChange={() => toggleItem(row.id)} /></td>
+                      <td className="px-3 py-2"><input value={row.name} onChange={(event) => handleRowChange(row.id, "name", event.target.value)} className="w-72 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
+                      <td className="px-3 py-2"><input value={row.category} onChange={(event) => handleRowChange(row.id, "category", event.target.value)} className="w-40 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
+                      <td className="px-3 py-2"><input value={row.supplier} onChange={(event) => handleRowChange(row.id, "supplier", event.target.value)} className="w-40 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
+                      <td className="px-3 py-2"><input value={row.fobPrice} onChange={(event) => handleRowChange(row.id, "fobPrice", event.target.value)} className="w-24 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
+                      <td className="px-3 py-2"><input value={row.leadTime} onChange={(event) => handleRowChange(row.id, "leadTime", event.target.value)} className="w-28 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
+                      <td className="px-3 py-2"><span className="rounded bg-secondary/10 px-2 py-0.5 text-[10px] font-semibold text-navy">{row.status}</span></td>
                     </tr>
                   ))}
                 </tbody>
@@ -273,54 +461,204 @@ function UploadPage() {
           </div>
 
           <div className="mt-5 flex flex-wrap gap-3">
-            <button onClick={publish} className="rounded-md bg-navy px-6 py-3 text-sm font-semibold text-white hover:bg-[#1A5491]">
-              Publish Selected to Catalogue
+            <button
+              onClick={handlePublish}
+              disabled={saveMutation.isPending}
+              className="inline-flex items-center gap-2 rounded-md bg-navy px-6 py-3 text-sm font-semibold text-white hover:bg-[#1A5491] disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <Globe className="h-4 w-4" />
+              {saveMutation.isPending ? "Saving…" : "Publish Selected"}
             </button>
-            <button className="rounded-md border border-navy px-6 py-3 text-sm font-semibold text-navy hover:bg-navy hover:text-white">
+            <button
+              onClick={handleSaveAsDraft}
+              disabled={saveMutation.isPending}
+              className="inline-flex items-center gap-2 rounded-md border border-navy px-6 py-3 text-sm font-semibold text-navy hover:bg-navy hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <FileText className="h-4 w-4" />
               Save as Draft
             </button>
-            <button onClick={() => { setStage("idle"); setRows(MOCK_EXTRACTED); }} className="rounded-md px-6 py-3 text-sm font-semibold text-mutedink hover:text-navy">
+            <button
+              onClick={() => { setStage("idle"); setRows([]); setSelected(new Set()); setSelectedFile(null); }}
+              className="rounded-md border border-input px-6 py-3 text-sm font-semibold text-charcoal hover:bg-slate-50"
+            >
               Upload Another
             </button>
           </div>
 
-          {toast && (
-            <div className="fixed bottom-6 right-6 z-50 rounded-md bg-green px-4 py-3 text-sm font-semibold text-white shadow-lg">
-              {toast}
-            </div>
-          )}
+          {toast && <div className="fixed bottom-6 right-6 z-50 rounded-md bg-green px-4 py-3 text-sm font-semibold text-white shadow-lg">{toast}</div>}
         </div>
       )}
     </div>
   );
 }
 
+// ─── Product Catalogue Page ────────────────────────────────────────────────────
+const PRODUCT_STATUS_TABS = ["All", "Published", "Draft", "Needs Review"] as const;
+type ProductStatusTab = typeof PRODUCT_STATUS_TABS[number];
+
 function CataloguePage() {
-  const products = [
-    { id: 1, name: "Italian Marble Look Porcelain", cat: "Tiles & Flooring", sup: "Guangdong Elite", price: "₹58–72", status: "Published" },
-    { id: 2, name: "Matte Black Basin Mixer Tap", cat: "Sanitaryware", sup: "Wenzhou Brass Works", price: "₹3.2K–4.8K", status: "Published" },
-    { id: 3, name: "CNC Laser Cutting Machine 1325", cat: "Machinery", sup: "Jinan Precision", price: "₹4.2L–5.8L", status: "Published" },
-    { id: 4, name: "Terrazzo Cement Floor Tile", cat: "Tiles & Flooring", sup: "Foshan Tile Co.", price: "₹85–110", status: "Draft" },
-    { id: 5, name: "LED Recessed Panel 60×60", cat: "Lighting", sup: "Shenzhen Lumens", price: "₹680–920", status: "Published" },
-    { id: 6, name: "Galvanised Steel C-Purlin", cat: "Structural", sup: "Tianjin Steel", price: "₹62–78", status: "Needs Review" },
-  ];
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [statusTab, setStatusTab] = useState<ProductStatusTab>("All");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editValues, setEditValues] = useState<Partial<ProductCreateInput>>({});
+  const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
+  const [newProduct, setNewProduct] = useState<ProductCreateInput>({
+    name: "",
+    category: "Tiles & Flooring",
+    supplier: "",
+    fobPrice: "",
+    leadTime: "",
+    status: "Draft",
+  });
+  const [toast, setToast] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+
+  const productsQuery = useQuery<Product[]>({
+    queryKey: ["products"],
+    queryFn: () => apiFetch<Product[]>("/api/products"),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (product: ProductCreateInput) => apiFetch<Product>("/api/products", { method: "POST", body: JSON.stringify(product) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      setShowCreate(false);
+      setNewProduct({ name: "", category: "Tiles & Flooring", supplier: "", fobPrice: "", leadTime: "", status: "Draft" });
+      setToast("Product created successfully.");
+      setTimeout(() => setToast(null), 3000);
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: Partial<ProductCreateInput> }) => apiFetch<Product>(`/api/products/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      setEditingId(null);
+      setEditValues({});
+      setToast("Product updated successfully.");
+      setTimeout(() => setToast(null), 3000);
+    },
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: number; status: string }) =>
+      apiFetch<Product>(`/api/products/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      queryClient.invalidateQueries({ queryKey: ["products", "published"] });
+      const label = updated.status === "Published" ? "published" : updated.status === "Draft" ? "set to Draft" : "updated";
+      setToast(`Product ${label} successfully.`);
+      setTimeout(() => setToast(null), 3000);
+    },
+    onError: () => {
+      setToast("Failed to update product status.");
+      setTimeout(() => setToast(null), 3000);
+    },
+  });
+
+  // Status counts for tabs
+  const statusCounts = useMemo(() => {
+    const all = productsQuery.data ?? [];
+    return PRODUCT_STATUS_TABS.reduce((acc, s) => {
+      acc[s] = s === "All" ? all.length : all.filter((p) => p.status === s).length;
+      return acc;
+    }, {} as Record<ProductStatusTab, number>);
+  }, [productsQuery.data]);
+
+  const filteredProducts = useMemo(() => {
+    const term = search.toLowerCase();
+    return (productsQuery.data ?? []).filter((product) => {
+      if (statusTab !== "All" && product.status !== statusTab) return false;
+      return (
+        product.name.toLowerCase().includes(term) ||
+        product.category.toLowerCase().includes(term) ||
+        product.supplier.toLowerCase().includes(term) ||
+        product.status.toLowerCase().includes(term)
+      );
+    });
+  }, [productsQuery.data, search, statusTab]);
+
+  const handleSave = (id: number) => {
+    updateMutation.mutate({ id, data: editValues });
+  };
+
+  const CATEGORIES = ["Tiles & Flooring", "Sanitaryware", "Machinery", "Surface Finishes", "Structural", "Lighting", "Other"];
+
   return (
     <div>
+      {viewingProduct && (
+        <ProductViewModal product={viewingProduct} onClose={() => setViewingProduct(null)} />
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-display text-2xl font-extrabold text-navy">Product Catalogue</h1>
-        <button className="inline-flex items-center gap-2 rounded-md bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-[#1A5491]">
-          <Upload className="h-4 w-4" /> Upload New Catalogue
+        <div>
+          <h1 className="font-display text-2xl font-extrabold text-navy">Product Catalogue</h1>
+          <p className="mt-1 text-sm text-mutedink">Manage product listings and publish updates.</p>
+        </div>
+        <button onClick={() => setShowCreate((prev) => !prev)} className="inline-flex items-center gap-2 rounded-md bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-[#1A5491]">
+          <Upload className="h-4 w-4" /> {showCreate ? "Close form" : "Create Product"}
         </button>
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-[240px]">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-mutedink" />
-          <input placeholder="Search products…" className="w-full rounded-md border border-input bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-ocean" />
+      {showCreate && (
+        <div className="mt-5 rounded-xl border border-border bg-white p-6 shadow-sm">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Product Name" value={newProduct.name} onChange={(event) => setNewProduct((prev) => ({ ...prev, name: event.target.value }))} />
+            <Field label="Supplier" value={newProduct.supplier} onChange={(event) => setNewProduct((prev) => ({ ...prev, supplier: event.target.value }))} />
+            <Field label="FOB Price" value={newProduct.fobPrice} onChange={(event) => setNewProduct((prev) => ({ ...prev, fobPrice: event.target.value }))} />
+            <Field label="Lead Time (optional)" value={newProduct.leadTime ?? ""} onChange={(event) => setNewProduct((prev) => ({ ...prev, leadTime: event.target.value }))} />
+            <SelectField
+              label="Category"
+              options={CATEGORIES}
+              value={newProduct.category}
+              onChange={(event) => setNewProduct((prev) => ({ ...prev, category: event.target.value }))}
+            />
+            <label className="block">
+              <span className="block text-xs font-semibold uppercase tracking-wider text-mutedink">Status</span>
+              <select
+                value={newProduct.status}
+                onChange={(e) => setNewProduct((prev) => ({ ...prev, status: e.target.value }))}
+                className="mt-1 w-full rounded-md border border-input bg-white px-3 py-2.5 text-sm outline-none focus:border-ocean"
+              >
+                <option>Draft</option>
+                <option>Published</option>
+                <option>Needs Review</option>
+              </select>
+            </label>
+          </div>
+          <div className="mt-4 flex gap-3">
+            <button onClick={() => createMutation.mutate(newProduct)} disabled={createMutation.isPending} className="rounded-md bg-navy px-5 py-2 text-sm font-semibold text-white hover:bg-[#1A5491] disabled:cursor-not-allowed disabled:opacity-60">Save Product</button>
+            <button onClick={() => setShowCreate(false)} className="rounded-md border border-input px-5 py-2 text-sm font-semibold text-navy hover:bg-slate-50">Cancel</button>
+          </div>
         </div>
-        <select className="rounded-md border border-input bg-white px-3 py-2 text-sm"><option>All Categories</option></select>
-        <select className="rounded-md border border-input bg-white px-3 py-2 text-sm"><option>All Suppliers</option></select>
-        <select className="rounded-md border border-input bg-white px-3 py-2 text-sm"><option>All Status</option><option>Published</option><option>Draft</option><option>Needs Review</option></select>
+      )}
+
+      {/* Status filter tabs */}
+      <div className="mt-5 flex flex-wrap gap-2">
+        {PRODUCT_STATUS_TABS.map((s) => (
+          <button
+            key={s}
+            onClick={() => setStatusTab(s)}
+            className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+              statusTab === s
+                ? "bg-navy text-white"
+                : "bg-white border border-input text-charcoal hover:border-navy hover:text-navy"
+            }`}
+          >
+            {s}
+            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+              statusTab === s ? "bg-white/20 text-white" : "bg-offwhite text-mutedink"
+            }`}>{statusCounts[s]}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-3">
+        <div className="relative flex-1 min-w-[260px]">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-mutedink" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products…" className="w-full rounded-md border border-input bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-ocean" />
+        </div>
       </div>
 
       <div className="mt-5 overflow-hidden rounded-xl border border-border bg-white">
@@ -331,53 +669,192 @@ function CataloguePage() {
               <th className="px-4 py-2.5">Category</th>
               <th className="px-4 py-2.5">Supplier</th>
               <th className="px-4 py-2.5">FOB Price</th>
+              <th className="px-4 py-2.5">Lead Time</th>
               <th className="px-4 py-2.5">Status</th>
               <th className="px-4 py-2.5">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {products.map((p) => (
-              <tr key={p.id} className="border-t border-border">
-                <td className="px-4 py-3"><div className="flex items-center gap-3"><div className="h-9 w-9 rounded bg-offwhite" /><span className="font-medium text-navy">{p.name}</span></div></td>
-                <td className="px-4 py-3 text-charcoal">{p.cat}</td>
-                <td className="px-4 py-3 text-charcoal">{p.sup}</td>
-                <td className="px-4 py-3 font-mono-data text-charcoal">{p.price}</td>
+            {productsQuery.isLoading ? (
+              <tr><td colSpan={7} className="px-4 py-6 text-center text-sm text-mutedink">Loading products…</td></tr>
+            ) : filteredProducts.length === 0 ? (
+              <tr><td colSpan={7} className="px-4 py-6 text-center text-sm text-mutedink">No products found.</td></tr>
+            ) : filteredProducts.map((product) => (
+              <tr key={product.id} className="border-t border-border">
                 <td className="px-4 py-3">
-                  <span className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
-                    p.status === "Published" ? "bg-green/15 text-green" :
-                    p.status === "Draft" ? "bg-secondary text-navy" :
-                    "bg-gold/20 text-gold"
-                  }`}>{p.status}</span>
+                  {editingId === product.id ? (
+                    <input className="w-full rounded border border-input px-2 py-1 text-sm" value={editValues.name ?? product.name} onChange={(event) => setEditValues((prev) => ({ ...prev, name: event.target.value }))} />
+                  ) : (
+                    <div className="font-medium text-navy">{product.name}</div>
+                  )}
                 </td>
-                <td className="px-4 py-3"><div className="flex gap-2 text-mutedink"><button className="hover:text-navy"><Pencil className="h-4 w-4" /></button><button className="hover:text-navy"><Eye className="h-4 w-4" /></button></div></td>
+                <td className="px-4 py-3 text-charcoal">
+                  {editingId === product.id ? (
+                    <select className="rounded border border-input px-2 py-1 text-sm" value={editValues.category ?? product.category} onChange={(event) => setEditValues((prev) => ({ ...prev, category: event.target.value }))}>
+                      {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                    </select>
+                  ) : product.category}
+                </td>
+                <td className="px-4 py-3 text-charcoal">
+                  {editingId === product.id ? (
+                    <input className="w-full rounded border border-input px-2 py-1 text-sm" value={editValues.supplier ?? product.supplier} onChange={(event) => setEditValues((prev) => ({ ...prev, supplier: event.target.value }))} />
+                  ) : product.supplier}
+                </td>
+                <td className="px-4 py-3 font-mono-data text-charcoal">
+                  {editingId === product.id ? (
+                    <input className="w-full rounded border border-input px-2 py-1 text-sm" value={editValues.fobPrice ?? product.fobPrice} onChange={(event) => setEditValues((prev) => ({ ...prev, fobPrice: event.target.value }))} />
+                  ) : product.fobPrice}
+                </td>
+                <td className="px-4 py-3 text-charcoal">
+                  {editingId === product.id ? (
+                    <input className="w-28 rounded border border-input px-2 py-1 text-sm" value={editValues.leadTime ?? product.leadTime ?? ""} onChange={(event) => setEditValues((prev) => ({ ...prev, leadTime: event.target.value }))} />
+                  ) : (product.leadTime || <span className="text-mutedink">—</span>)}
+                </td>
+                <td className="px-4 py-3">
+                  {editingId === product.id ? (
+                    <select className="rounded border border-input px-2 py-1 text-sm" value={editValues.status ?? product.status} onChange={(event) => setEditValues((prev) => ({ ...prev, status: event.target.value }))}>
+                      <option>Published</option>
+                      <option>Draft</option>
+                      <option>Needs Review</option>
+                    </select>
+                  ) : (
+                    <span className={`rounded px-2 py-1 text-xs font-semibold ${PRODUCT_STATUS_STYLES[product.status] ?? "bg-secondary text-navy"}`}>
+                      {product.status}
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-2 text-mutedink">
+                    {editingId === product.id ? (
+                      <>
+                        <button onClick={() => handleSave(product.id)} className="rounded-md bg-navy px-3 py-2 text-xs font-semibold text-white hover:bg-[#1A5491]">Save</button>
+                        <button onClick={() => { setEditingId(null); setEditValues({}); }} className="rounded-md border border-input px-3 py-2 text-xs font-semibold text-navy hover:bg-slate-50">Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        {/* Quick publish / unpublish */}
+                        {product.status !== "Published" ? (
+                          <button
+                            onClick={() => statusMutation.mutate({ id: product.id, status: "Published" })}
+                            disabled={statusMutation.isPending}
+                            className="inline-flex items-center gap-1 rounded-md bg-green/10 border border-green/30 px-3 py-2 text-xs font-semibold text-green hover:bg-green hover:text-white disabled:opacity-50"
+                          >
+                            <Globe className="h-3 w-3" /> Publish
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => statusMutation.mutate({ id: product.id, status: "Draft" })}
+                            disabled={statusMutation.isPending}
+                            className="inline-flex items-center gap-1 rounded-md bg-secondary border border-input px-3 py-2 text-xs font-semibold text-navy hover:bg-offwhite disabled:opacity-50"
+                          >
+                            <FileText className="h-3 w-3" /> Unpublish
+                          </button>
+                        )}
+                        <button
+                          onClick={() => { setEditingId(product.id); setEditValues({ name: product.name, category: product.category, supplier: product.supplier, fobPrice: product.fobPrice, leadTime: product.leadTime ?? "", status: product.status }); }}
+                          className="inline-flex items-center gap-1 rounded-md border border-input px-3 py-2 text-xs font-semibold text-navy hover:bg-slate-50"
+                        >
+                          <Pencil className="h-3 w-3" /> Edit
+                        </button>
+                        <button
+                          onClick={() => setViewingProduct(product)}
+                          className="inline-flex items-center gap-1 rounded-md border border-input px-3 py-2 text-xs font-semibold text-navy hover:bg-slate-50"
+                        >
+                          <Eye className="h-3 w-3" /> View
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {toast && <div className="fixed bottom-6 right-6 z-50 rounded-md bg-green px-4 py-3 text-sm font-semibold text-white shadow-lg">{toast}</div>}
     </div>
   );
 }
 
+// ─── Enquiries Page ────────────────────────────────────────────────────────────
+const ENQUIRY_STATUSES = ["All", "New", "In Progress", "Quoted", "Closed"] as const;
+type EnquiryStatus = typeof ENQUIRY_STATUSES[number];
+
 function EnquiriesPage() {
-  const enquiries = [
-    { ref: "CRF-2026-04821", name: "Rohan Patel", co: "Studio Linework", role: "Architect", items: "Porcelain tile (500sqm), Basin mixer (24)", date: "29 Jun 2026", status: "New" },
-    { ref: "CRF-2026-04820", name: "Ananya Rao", co: "Built Forms", role: "Interior Designer", items: "Marble slab (180sqm)", date: "29 Jun 2026", status: "In Progress" },
-    { ref: "CRF-2026-04819", name: "Vikram Shah", co: "ShahCon Pvt", role: "Developer", items: "Vitrified tile (12000sqm)", date: "28 Jun 2026", status: "Quoted" },
-    { ref: "CRF-2026-04818", name: "Karthik N.", co: "Madras Mech", role: "Machinery Buyer", items: "CNC laser cutter (2 units)", date: "28 Jun 2026", status: "Quoted" },
-    { ref: "CRF-2026-04817", name: "Priya M.", co: "M&M Interiors", role: "Architect", items: "Recessed LED panels (140)", date: "27 Jun 2026", status: "Closed" },
-  ];
-  const chipClass = (s: string) =>
-    s === "New" ? "bg-gold/20 text-gold" :
-    s === "In Progress" ? "bg-ocean/20 text-navy" :
-    s === "Quoted" ? "bg-green/15 text-green" :
-    "bg-secondary text-mutedink";
+  const queryClient = useQueryClient();
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [statusValue, setStatusValue] = useState("");
+  const [toast, setToast] = useState<string | null>(null);
+  const [filterStatus, setFilterStatus] = useState<EnquiryStatus>("All");
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  const enquiriesQuery = useQuery<Enquiry[]>({
+    queryKey: ["enquiries"],
+    queryFn: () => apiFetch<Enquiry[]>("/api/enquiries"),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: number; status: string }) => apiFetch<Enquiry>(`/api/enquiries/${id}`, { method: "PUT", body: JSON.stringify({ status }) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["enquiries"] });
+      setEditingId(null);
+      setToast("Enquiry status updated.");
+      setTimeout(() => setToast(null), 3000);
+    },
+    onError: () => {
+      setToast("Failed to update enquiry.");
+      setTimeout(() => setToast(null), 3000);
+    },
+  });
+
+  const filteredEnquiries = useMemo(() => {
+    const all = enquiriesQuery.data ?? [];
+    if (filterStatus === "All") return all;
+    return all.filter((e) => e.status === filterStatus);
+  }, [enquiriesQuery.data, filterStatus]);
+
+  const statusCounts = useMemo(() => {
+    const all = enquiriesQuery.data ?? [];
+    return ENQUIRY_STATUSES.reduce((acc, s) => {
+      acc[s] = s === "All" ? all.length : all.filter((e) => e.status === s).length;
+      return acc;
+    }, {} as Record<EnquiryStatus, number>);
+  }, [enquiriesQuery.data]);
 
   return (
     <div>
-      <h1 className="font-display text-2xl font-extrabold text-navy">Enquiries</h1>
-      <p className="mt-1 text-sm text-mutedink">Sourcing requests submitted via the website.</p>
-      <div className="mt-5 overflow-hidden rounded-xl border border-border bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl font-extrabold text-navy">Enquiries</h1>
+          <p className="mt-1 text-sm text-mutedink">Customer sourcing requests submitted via the website.</p>
+        </div>
+        <div className="rounded-md bg-slate-50 px-4 py-2 text-sm text-slate-700">
+          Total: {enquiriesQuery.data?.length ?? 0}
+        </div>
+      </div>
+
+      {/* Status filter tabs */}
+      <div className="mt-5 flex flex-wrap gap-2">
+        {ENQUIRY_STATUSES.map((s) => (
+          <button
+            key={s}
+            onClick={() => setFilterStatus(s)}
+            className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+              filterStatus === s
+                ? "bg-navy text-white"
+                : "bg-white border border-input text-charcoal hover:border-navy hover:text-navy"
+            }`}
+          >
+            {s}
+            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${filterStatus === s ? "bg-white/20 text-white" : "bg-offwhite text-mutedink"}`}>
+              {statusCounts[s]}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4 overflow-hidden rounded-xl border border-border bg-white">
         <table className="w-full text-left text-sm">
           <thead className="bg-offwhite text-xs text-mutedink">
             <tr>
@@ -386,29 +863,129 @@ function EnquiriesPage() {
               <th className="px-4 py-2.5">Company</th>
               <th className="px-4 py-2.5">Role</th>
               <th className="px-4 py-2.5">Products</th>
+              <th className="px-4 py-2.5">Contact</th>
               <th className="px-4 py-2.5">Submitted</th>
               <th className="px-4 py-2.5">Status</th>
+              <th className="px-4 py-2.5">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {enquiries.map((e) => (
-              <tr key={e.ref} className="cursor-pointer border-t border-border hover:bg-offwhite">
-                <td className="px-4 py-3 font-mono-data text-xs text-navy">{e.ref}</td>
-                <td className="px-4 py-3 font-medium text-navy">{e.name}</td>
-                <td className="px-4 py-3 text-charcoal">{e.co}</td>
-                <td className="px-4 py-3 text-charcoal">{e.role}</td>
-                <td className="px-4 py-3 text-charcoal">{e.items}</td>
-                <td className="px-4 py-3 text-mutedink">{e.date}</td>
-                <td className="px-4 py-3"><span className={`rounded px-2 py-0.5 text-[10px] font-semibold ${chipClass(e.status)}`}>{e.status}</span></td>
-              </tr>
+            {enquiriesQuery.isLoading ? (
+              <tr><td colSpan={9} className="px-4 py-6 text-center text-sm text-mutedink">Loading enquiries…</td></tr>
+            ) : filteredEnquiries.length === 0 ? (
+              <tr><td colSpan={9} className="px-4 py-6 text-center text-sm text-mutedink">No enquiries found.</td></tr>
+            ) : filteredEnquiries.map((enquiry) => (
+              <>
+                <tr key={enquiry.id} className="border-t border-border hover:bg-offwhite">
+                  <td className="px-4 py-3 font-mono-data text-xs text-navy">{enquiry.reference}</td>
+                  <td className="px-4 py-3 font-medium text-navy">{enquiry.name}</td>
+                  <td className="px-4 py-3 text-charcoal">{enquiry.company}</td>
+                  <td className="px-4 py-3 text-charcoal">{enquiry.role}</td>
+                  <td className="px-4 py-3 max-w-[160px] truncate text-charcoal" title={enquiry.items}>{enquiry.items}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-col gap-0.5">
+                      {enquiry.email && (
+                        <a href={`mailto:${enquiry.email}`} className="flex items-center gap-1 text-xs text-ocean hover:underline">
+                          <Mail className="h-3 w-3" />{enquiry.email}
+                        </a>
+                      )}
+                      {enquiry.phone && (
+                        <a href={`tel:${enquiry.phone}`} className="flex items-center gap-1 text-xs text-charcoal hover:underline">
+                          <Phone className="h-3 w-3" />{enquiry.phone}
+                        </a>
+                      )}
+                      {!enquiry.email && !enquiry.phone && <span className="text-xs text-mutedink">—</span>}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-mutedink">{new Date(enquiry.submittedAt).toLocaleDateString()}</td>
+                  <td className="px-4 py-3">
+                    {editingId === enquiry.id ? (
+                      <select className="rounded-md border border-input bg-white px-2 py-1 text-sm" value={statusValue} onChange={(event) => setStatusValue(event.target.value)}>
+                        <option>New</option>
+                        <option>In Progress</option>
+                        <option>Quoted</option>
+                        <option>Closed</option>
+                      </select>
+                    ) : (
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-semibold ${ENQUIRY_STATUS_STYLES[enquiry.status] ?? "bg-secondary text-mutedink"}`}>
+                        {enquiry.status}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-2">
+                      {editingId === enquiry.id ? (
+                        <>
+                          <button onClick={() => updateMutation.mutate({ id: enquiry.id, status: statusValue })} className="rounded-md bg-navy px-3 py-2 text-xs font-semibold text-white hover:bg-[#1A5491]">Save</button>
+                          <button onClick={() => setEditingId(null)} className="rounded-md border border-input px-3 py-2 text-xs font-semibold text-navy hover:bg-slate-50">Cancel</button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => { setEditingId(enquiry.id); setStatusValue(enquiry.status); }}
+                            className="inline-flex items-center gap-1 rounded-md border border-input px-3 py-2 text-xs font-semibold text-navy hover:bg-slate-50"
+                          >
+                            <Pencil className="h-3 w-3" /> Edit
+                          </button>
+                          <button
+                            onClick={() => setExpandedId(expandedId === enquiry.id ? null : enquiry.id)}
+                            className="inline-flex items-center gap-1 rounded-md border border-input px-3 py-2 text-xs font-semibold text-navy hover:bg-slate-50"
+                          >
+                            {expandedId === enquiry.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />} View
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+
+                {/* Expanded message row */}
+                {expandedId === enquiry.id && (
+                  <tr key={`${enquiry.id}-expanded`} className="border-t border-border bg-offwhite">
+                    <td colSpan={9} className="px-6 py-4">
+                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wider text-mutedink">Message / Requirements</p>
+                          <p className="mt-1 whitespace-pre-line text-sm text-navy">{enquiry.message || "—"}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wider text-mutedink">Items Requested</p>
+                          <p className="mt-1 text-sm text-navy">{enquiry.items}</p>
+                        </div>
+                        <div className="space-y-3">
+                          {enquiry.email && (
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wider text-mutedink">Email</p>
+                              <a href={`mailto:${enquiry.email}`} className="mt-1 text-sm text-ocean hover:underline">{enquiry.email}</a>
+                            </div>
+                          )}
+                          {enquiry.phone && (
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wider text-mutedink">Phone / WhatsApp</p>
+                              <a href={`tel:${enquiry.phone}`} className="mt-1 text-sm text-navy hover:underline">{enquiry.phone}</a>
+                            </div>
+                          )}
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-wider text-mutedink">Submitted</p>
+                            <p className="mt-1 font-mono-data text-xs text-charcoal">{new Date(enquiry.submittedAt).toLocaleString()}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </>
             ))}
           </tbody>
         </table>
       </div>
+
+      {toast && <div className="fixed bottom-6 right-6 z-50 rounded-md bg-green px-4 py-3 text-sm font-semibold text-white shadow-lg">{toast}</div>}
     </div>
   );
 }
 
+// ─── Shared UI ─────────────────────────────────────────────────────────────────
 function PlaceholderBlock({ title, desc }: { title: string; desc: string }) {
   return (
     <div className="rounded-xl border border-dashed border-border bg-white p-10 text-center">
@@ -418,7 +995,7 @@ function PlaceholderBlock({ title, desc }: { title: string; desc: string }) {
   );
 }
 
-function Field({ label, ...rest }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+function Field({ label, ...rest }: { label: string } & InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block">
       <span className="block text-xs font-semibold uppercase tracking-wider text-mutedink">{label}</span>
@@ -427,12 +1004,12 @@ function Field({ label, ...rest }: { label: string } & React.InputHTMLAttributes
   );
 }
 
-function SelectField({ label, options }: { label: string; options: string[] }) {
+function SelectField({ label, options, value, onChange }: { label: string; options: string[]; value?: string; onChange?: ChangeEventHandler<HTMLSelectElement> }) {
   return (
     <label className="block">
       <span className="block text-xs font-semibold uppercase tracking-wider text-mutedink">{label}</span>
-      <select className="mt-1 w-full rounded-md border border-input bg-white px-3 py-2.5 text-sm outline-none focus:border-ocean">
-        {options.map((o) => <option key={o}>{o}</option>)}
+      <select value={value} onChange={onChange} className="mt-1 w-full rounded-md border border-input bg-white px-3 py-2.5 text-sm outline-none focus:border-ocean">
+        {options.map((option) => <option key={option} value={option}>{option}</option>)}
       </select>
     </label>
   );

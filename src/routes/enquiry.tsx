@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState, useMemo } from "react";
+import { useRef, useState, useMemo } from "react";
 import { CheckCircle2, X } from "lucide-react";
 import { useEnquiry } from "@/lib/enquiry";
+import { apiFetch } from "@/lib/api";
 
 export const Route = createFileRoute("/enquiry")({
   head: () => ({
@@ -16,11 +17,55 @@ export const Route = createFileRoute("/enquiry")({
 function EnquiryPage() {
   const { items, remove } = useEnquiry();
   const [submitted, setSubmitted] = useState(false);
+  const [reference, setReference] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   const prefill = useMemo(
     () => (items.length ? items.map((i) => `- ${i.name} (${i.spec ?? ""}) · ${i.origin ?? ""}`).join("\n") : ""),
     [items],
   );
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+
+    const fd = new FormData(e.currentTarget);
+    const payload = {
+      name: fd.get("name") as string,
+      company: fd.get("company") as string,
+      role: fd.get("role") as string,
+      email: fd.get("email") as string,
+      phone: fd.get("whatsapp") as string,
+      items: items.length
+        ? items.map((i) => i.name).join(", ")
+        : ((fd.get("sourcing") as string) || "General enquiry"),
+      message: [
+        fd.get("sourcing") as string,
+        fd.get("qty") ? `Quantity: ${fd.get("qty")}` : "",
+        fd.get("timeline") ? `Timeline: ${fd.get("timeline")}` : "",
+        fd.get("destination") ? `Destination: ${fd.get("destination")}` : "",
+        fd.get("source") ? `Source: ${fd.get("source")}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    };
+
+    try {
+      const result = await apiFetch<{ reference: string }>("/api/enquiries", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setReference(result.reference);
+      setSubmitted(true);
+    } catch (err) {
+      setError((err as Error).message || "Failed to submit enquiry. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   if (submitted) {
     return (
@@ -31,10 +76,10 @@ function EnquiryPage() {
         <h1 className="mt-6 font-display text-3xl font-extrabold text-navy">Enquiry received.</h1>
         <p className="mt-2 text-charcoal">Our team will contact you within 24 hours via WhatsApp and email.</p>
         <div className="mt-6 inline-block rounded-md bg-offwhite px-4 py-2 font-mono-data text-sm">
-          Reference: <span className="font-semibold text-navy">CRF-2026-04821</span>
+          Reference: <span className="font-semibold text-navy">{reference}</span>
         </div>
         <div className="mt-8 flex flex-wrap justify-center gap-3">
-          <button onClick={() => setSubmitted(false)} className="rounded-md border border-navy px-5 py-2.5 text-sm font-semibold text-navy hover:bg-navy hover:text-white">Submit Another Enquiry</button>
+          <button onClick={() => { setSubmitted(false); setReference(""); formRef.current?.reset(); }} className="rounded-md border border-navy px-5 py-2.5 text-sm font-semibold text-navy hover:bg-navy hover:text-white">Submit Another Enquiry</button>
           <Link to="/products/tiles-flooring" className="rounded-md bg-navy px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#1A5491]">Browse More Products</Link>
         </div>
       </div>
@@ -91,8 +136,9 @@ function EnquiryPage() {
 
         {/* Form */}
         <form
+          ref={formRef}
           className="bg-white p-8 sm:p-10"
-          onSubmit={(e) => { e.preventDefault(); setSubmitted(true); }}
+          onSubmit={handleSubmit}
         >
           <div className="grid gap-5 sm:grid-cols-2">
             <Field label="Full Name" name="name" required />
@@ -141,8 +187,12 @@ function EnquiryPage() {
             <SelectField label="How did you hear about us?" name="source" options={["Google search", "LinkedIn", "Referral", "Trade event", "Other"]} />
           </div>
 
-          <button type="submit" className="mt-8 w-full rounded-md bg-navy py-3.5 text-sm font-semibold text-white hover:bg-[#1A5491]">
-            Send Enquiry →
+          {error && (
+            <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+          )}
+
+          <button type="submit" disabled={submitting} className="mt-8 w-full rounded-md bg-navy py-3.5 text-sm font-semibold text-white hover:bg-[#1A5491] disabled:cursor-not-allowed disabled:opacity-60">
+            {submitting ? "Submitting…" : "Send Enquiry →"}
           </button>
         </form>
       </div>
