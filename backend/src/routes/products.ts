@@ -18,6 +18,7 @@ const productSchema = z.object({
   supplier: z.string().min(1),
   fobPrice: z.string().min(1),
   leadTime: z.string().optional(),
+  imageUrl: z.string().optional(),
   status: z.string().min(1),
 });
 
@@ -47,8 +48,8 @@ router.get("/:id", async (req, res) => {
 router.post("/", async (req, res) => {
   const result = productSchema.safeParse(req.body);
   if (!result.success) return res.status(400).json({ errors: result.error.format() });
-  const { leadTime, ...rest } = result.data;
-  const product = await createProduct({ ...rest, leadTime: leadTime ?? null });
+  const { leadTime, imageUrl, ...rest } = result.data;
+  const product = await createProduct({ ...rest, leadTime: leadTime ?? null, imageUrl: imageUrl ?? null });
   res.status(201).json(product);
 });
 

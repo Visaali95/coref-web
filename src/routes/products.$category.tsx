@@ -22,6 +22,8 @@ export const Route = createFileRoute("/products/$category")({
 });
 
 // ─── DB Product type (matches backend schema) ──────────────────────────────────
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+
 type DbProduct = {
   id: number;
   name: string;
@@ -29,6 +31,7 @@ type DbProduct = {
   supplier: string;
   fobPrice: string;
   leadTime?: string;
+  imageUrl?: string | null;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -262,8 +265,10 @@ function ProductCard({ p }: { p: DbProduct }) {
   const { add, has } = useEnquiry();
   const added = has(String(p.id));
 
-  // Generate a deterministic placeholder image based on product id
-  const image = `https://picsum.photos/seed/prod-${p.id}/900/600`;
+  // Use the real uploaded image if available, otherwise fall back to a deterministic placeholder
+  const image = p.imageUrl
+    ? `${API_BASE}${p.imageUrl}`
+    : `https://picsum.photos/seed/prod-${p.id}/900/600`;
 
   return (
     <div className="group flex flex-col overflow-hidden rounded-xl border border-border bg-white transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-navy/5">

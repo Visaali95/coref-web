@@ -44,6 +44,7 @@ type Product = {
   supplier: string;
   fobPrice: string;
   leadTime?: string;
+  imageUrl?: string | null;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -99,6 +100,11 @@ const ENQUIRY_STATUS_STYLES: Record<string, string> = {
 
 // ─── Product View Modal ────────────────────────────────────────────────────────
 function ProductViewModal({ product, onClose }: { product: Product; onClose: () => void }) {
+  const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+  const imgSrc = product.imageUrl
+    ? `${API_BASE}${product.imageUrl}`
+    : `https://picsum.photos/seed/prod-${product.id}/900/600`;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
@@ -120,6 +126,11 @@ function ProductViewModal({ product, onClose }: { product: Product; onClose: () 
           >
             <X className="h-5 w-5" />
           </button>
+        </div>
+
+        {/* Product image */}
+        <div className="aspect-[16/9] overflow-hidden bg-secondary">
+          <img src={imgSrc} alt={product.name} className="h-full w-full object-cover" />
         </div>
 
         {/* Body */}
@@ -509,10 +520,31 @@ function CataloguePage() {
     supplier: "",
     fobPrice: "",
     leadTime: "",
+    imageUrl: null,
     status: "Draft",
   });
   const [toast, setToast] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+
+  // ─── Image picker state ────────────────────────────────────────────────────
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageDragOver, setImageDragOver] = useState(false);
+
+  const handleImageSelect = (file: File | null) => {
+    if (!file) return;
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onload = (e) => setImagePreview(e.target?.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const clearImage = () => {
+    setImageFile(null);
+    setImagePreview(null);
+    setNewProduct((prev) => ({ ...prev, imageUrl: null }));
+  };
 
   const productsQuery = useQuery<Product[]>({
     queryKey: ["products"],
@@ -523,12 +555,36 @@ function CataloguePage() {
     mutationFn: async (product: ProductCreateInput) => apiFetch<Product>("/api/products", { method: "POST", body: JSON.stringify(product) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products"] });
+      queryClient.invalidateQueries({ queryKey: ["products", "published"] });
       setShowCreate(false);
-      setNewProduct({ name: "", category: "Tiles & Flooring", supplier: "", fobPrice: "", leadTime: "", status: "Draft" });
+      setNewProduct({ name: "", category: "Tiles & Flooring", supplier: "", fobPrice: "", leadTime: "", imageUrl: null, status: "Draft" });
+      clearImage();
       setToast("Product created successfully.");
       setTimeout(() => setToast(null), 3000);
     },
   });
+
+  const handleCreateProduct = async () => {
+    let finalImageUrl: string | null = newProduct.imageUrl ?? null;
+    if (imageFile) {
+      setImageUploading(true);
+      try {
+        const fd = new FormData();
+        fd.append("image", imageFile);
+        const res = await fetch(apiUrl("/api/upload/image"), { method: "POST", body: fd });
+        if (!res.ok) throw new Error("Upload failed");
+        const json = await res.json() as { imageUrl: string };
+        finalImageUrl = json.imageUrl;
+      } catch {
+        setToast("Image upload failed. Please try again.");
+        setTimeout(() => setToast(null), 3000);
+        return;
+      } finally {
+        setImageUploading(false);
+      }
+    }
+    createMutation.mutate({ ...newProduct, imageUrl: finalImageUrl });
+  };
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: Partial<ProductCreateInput> }) => apiFetch<Product>(`/api/products/${id}`, { method: "PUT", body: JSON.stringify(data) }),
@@ -603,6 +659,47 @@ function CataloguePage() {
 
       {showCreate && (
         <div className="mt-5 rounded-xl border border-border bg-white p-6 shadow-sm">
+          <h2 className="mb-5 font-display text-lg font-bold text-navy">New Product</h2>
+
+          {/* Image Picker */}
+          <div className="mb-5">
+            <span className="block text-xs font-semibold uppercase tracking-wider text-mutedink">Product Image</span>
+            <div
+              onDragOver={(e) => { e.preventDefault(); setImageDragOver(true); }}
+              onDragLeave={() => setImageDragOver(false)}
+              onDrop={(e) => { e.preventDefault(); setImageDragOver(false); handleImageSelect(e.dataTransfer.files[0] ?? null); }}
+              className={`mt-1 relative flex min-h-[140px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed transition-colors ${
+                imageDragOver ? "border-ocean bg-ocean/5" : imagePreview ? "border-ocean/40 bg-offwhite" : "border-input bg-white hover:border-ocean/60"
+              }`}
+            >
+              {imagePreview ? (
+                <>
+                  <img src={imagePreview} alt="Preview" className="h-full max-h-[280px] w-full rounded-xl object-cover" />
+                  <button
+                    type="button"
+                    onClick={clearImage}
+                    className="absolute right-2 top-2 rounded-full bg-black/60 p-1 text-white hover:bg-black/80"
+                    title="Remove image"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </>
+              ) : (
+                <label className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 p-6 text-center">
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    className="hidden"
+                    onChange={(e) => handleImageSelect(e.target.files?.[0] ?? null)}
+                  />
+                  <UploadCloud className="h-10 w-10 text-navy/40" />
+                  <span className="text-sm font-semibold text-navy">Drag & drop or click to upload</span>
+                  <span className="text-xs text-mutedink">JPEG, PNG, WEBP · max 10 MB</span>
+                </label>
+              )}
+            </div>
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Product Name" value={newProduct.name} onChange={(event) => setNewProduct((prev) => ({ ...prev, name: event.target.value }))} />
             <Field label="Supplier" value={newProduct.supplier} onChange={(event) => setNewProduct((prev) => ({ ...prev, supplier: event.target.value }))} />
@@ -627,9 +724,22 @@ function CataloguePage() {
               </select>
             </label>
           </div>
-          <div className="mt-4 flex gap-3">
-            <button onClick={() => createMutation.mutate(newProduct)} disabled={createMutation.isPending} className="rounded-md bg-navy px-5 py-2 text-sm font-semibold text-white hover:bg-[#1A5491] disabled:cursor-not-allowed disabled:opacity-60">Save Product</button>
-            <button onClick={() => setShowCreate(false)} className="rounded-md border border-input px-5 py-2 text-sm font-semibold text-navy hover:bg-slate-50">Cancel</button>
+
+          <div className="mt-5 flex gap-3">
+            <button
+              onClick={handleCreateProduct}
+              disabled={createMutation.isPending || imageUploading}
+              className="inline-flex items-center gap-2 rounded-md bg-navy px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#1A5491] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {(createMutation.isPending || imageUploading) && <Loader2 className="h-4 w-4 animate-spin" />}
+              {imageUploading ? "Uploading image…" : createMutation.isPending ? "Saving…" : "Save Product"}
+            </button>
+            <button
+              onClick={() => { setShowCreate(false); clearImage(); }}
+              className="rounded-md border border-input px-5 py-2.5 text-sm font-semibold text-navy hover:bg-slate-50"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}
