@@ -34,7 +34,7 @@ const VARIANTS = [
 const CITIES = ["Mumbai", "Delhi", "Chennai", "Bangalore", "Hyderabad", "Pune", "Other"];
 
 function ProductPage() {
-  const { product: p } = Route.useLoaderData();
+  const { product: p } = Route.useLoaderData() as { product: NonNullable<ReturnType<typeof getProduct>> };
   const { add, has } = useEnquiry();
   const added = has(p.id);
 

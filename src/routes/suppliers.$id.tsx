@@ -144,7 +144,7 @@ function SupplierPage() {
             <Link to="/enquiry" className="mt-5 block w-full rounded-md bg-navy py-3 text-center text-sm font-semibold text-white hover:bg-[#1A5491]">
               Request a Quote from this Supplier
             </Link>
-            <Link to="/products/tiles-flooring" className="mt-2 block w-full rounded-md border border-navy py-3 text-center text-sm font-semibold text-navy hover:bg-navy hover:text-white">
+            <Link to="/products/$category" params={{ category: "tiles-flooring" }} className="mt-2 block w-full rounded-md border border-navy py-3 text-center text-sm font-semibold text-navy hover:bg-navy hover:text-white">
               Browse their Products
             </Link>
             <div className="mt-5 flex gap-2 rounded-md bg-green/10 p-3 text-xs text-green">

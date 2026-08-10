@@ -121,7 +121,7 @@ function HomePage() {
               <Link to="/enquiry" className="rounded-md bg-white px-6 py-3 text-sm font-semibold text-navy transition-transform hover:-translate-y-0.5">
                 Start a Sourcing Request
               </Link>
-              <Link to="/products/tiles-flooring" className="rounded-md border border-white/40 px-6 py-3 text-sm font-semibold text-white hover:bg-white/10">
+              <Link to="/products/$category" params={{ category: "tiles-flooring" }} className="rounded-md border border-white/40 px-6 py-3 text-sm font-semibold text-white hover:bg-white/10">
                 Browse Products
               </Link>
             </div>
@@ -198,7 +198,7 @@ function HomePage() {
         <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
           <div className="mb-10 flex items-end justify-between gap-4">
             <h2 className="font-display text-3xl font-extrabold text-navy sm:text-4xl">Browse by Category</h2>
-            <Link to="/products/tiles-flooring" className="hidden text-sm font-semibold text-ocean hover:text-navy sm:inline">View all →</Link>
+            <Link to="/products/$category" params={{ category: "tiles-flooring" }} className="hidden text-sm font-semibold text-ocean hover:text-navy sm:inline">View all →</Link>
           </div>
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {CATEGORIES.map((c) => (
@@ -228,7 +228,7 @@ function HomePage() {
         <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
           <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
             <h2 className="font-display text-3xl font-extrabold text-navy sm:text-4xl">Featured Products</h2>
-            <Link to="/products/tiles-flooring" className="text-sm font-semibold text-ocean hover:text-navy">View all products →</Link>
+            <Link to="/products/$category" params={{ category: "tiles-flooring" }} className="text-sm font-semibold text-ocean hover:text-navy">View all products →</Link>
           </div>
 
           <div className="mb-6 inline-flex rounded-full border border-border bg-offwhite p-1">

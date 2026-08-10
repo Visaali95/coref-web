@@ -14,7 +14,7 @@ export function Footer() {
         <div>
           <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-ocean">Quick Links</div>
           <ul className="space-y-2 text-sm text-white/80">
-            <li><Link to="/products/tiles-flooring" className="hover:text-white">Products</Link></li>
+            <li><Link to="/products/$category" params={{ category: "tiles-flooring" }} className="hover:text-white">Products</Link></li>
             <li><Link to="/how-it-works" className="hover:text-white">How it works</Link></li>
             <li><Link to="/enquiry" className="hover:text-white">Start an enquiry</Link></li>
             <li><Link to="/suppliers/$id" params={{ id: "guangdong-elite-ceramics" }} className="hover:text-white">Suppliers</Link></li>

@@ -10,9 +10,8 @@ export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const links = [
-    { to: "/products/tiles-flooring", label: "Products" },
     { to: "/how-it-works", label: "How It Works" },
-    { to: "/suppliers/guangdong-elite-ceramics", label: "Suppliers" },
+    { to: "/suppliers/$id", label: "Suppliers", params: { id: "guangdong-elite-ceramics" } },
     { to: "/how-it-works", label: "About" },
   ] as const;
 
@@ -24,6 +23,14 @@ export function Header() {
         </Link>
 
         <nav className="hidden items-center gap-8 lg:flex">
+          <Link
+            to="/products/$category"
+            params={{ category: "tiles-flooring" }}
+            className="relative py-1 text-sm font-medium text-charcoal transition-colors hover:text-navy"
+            activeProps={{ className: "text-navy border-b-2 border-ocean" }}
+          >
+            Products
+          </Link>
           {links.map((l) => (
             <Link
               key={l.label}
@@ -94,6 +101,14 @@ export function Header() {
 
       {mobileOpen && (
         <div className="border-t border-border bg-white px-4 py-3 lg:hidden">
+          <Link
+            to="/products/$category"
+            params={{ category: "tiles-flooring" }}
+            className="block py-2 text-sm font-medium text-charcoal"
+            onClick={() => setMobileOpen(false)}
+          >
+            Products
+          </Link>
           {links.map((l) => (
             <Link
               key={l.label}

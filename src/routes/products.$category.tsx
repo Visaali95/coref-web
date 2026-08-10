@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Info, Check, Loader2 } from "lucide-react";
-import { getCategory, CATEGORIES } from "@/lib/catalog";
+import { getCategory, CATEGORIES, PRODUCTS } from "@/lib/catalog";
 import { useEnquiry } from "@/lib/enquiry";
 import { apiFetch } from "@/lib/api";
 
@@ -69,15 +69,51 @@ function CategoryPage() {
     staleTime: 30_000,
   });
 
-  // Filter to current category
+  // Convert mock catalog products into DbProduct structure to ensure all categories display items
+  const catalogAsDbProducts = useMemo<DbProduct[]>(() => {
+    return PRODUCTS.map((p, index) => ({
+      id: 10000 + index + 1,
+      name: p.name,
+      category: p.category,
+      supplier: p.supplier,
+      fobPrice: `₹${p.priceMin}–${p.priceMax} / ${p.unit}`,
+      leadTime: p.leadTime,
+      status: "Published",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }));
+  }, []);
+
+  // Merge DB published products with catalog products (deduplicating by name)
+  const combinedProducts = useMemo(() => {
+    const dbNames = new Set(allPublished.map((p) => p.name.toLowerCase()));
+    const extraCatalog = catalogAsDbProducts.filter((p) => !dbNames.has(p.name.toLowerCase()));
+    return [...allPublished, ...extraCatalog];
+  }, [allPublished, catalogAsDbProducts]);
+
+  // Normalize a string to a slug for flexible matching
+  const toSlug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+  // Filter to current category — matches by:
+  // 1. Exact catalog name match  e.g. "Tiles & Flooring"
+  // 2. Slug of stored category matches URL slug  e.g. "machinery" → "machinery"
+  // 3. Stored category slug matches catalog slug  e.g. toSlug("Machinery") === "machinery"
+  // 4. Substring/prefix matching between slugs
   const categoryProducts = useMemo(() => {
-    return allPublished.filter((p) => {
-      const catMatch = p.category === cat.name ||
-        p.category.toLowerCase().replace(/[^a-z0-9]/g, "-") === category ||
-        p.category.toLowerCase().includes(cat.name.toLowerCase().split(" ")[0]);
-      return catMatch;
+    return combinedProducts.filter((p) => {
+      const storedSlug = toSlug(p.category);
+      const catSlug = cat.slug;
+      return (
+        p.category === cat.name ||
+        storedSlug === category ||
+        storedSlug === catSlug ||
+        catSlug.startsWith(storedSlug) ||
+        storedSlug.startsWith(catSlug) ||
+        catSlug.includes(storedSlug) ||
+        storedSlug.includes(catSlug)
+      );
     });
-  }, [allPublished, cat, category]);
+  }, [combinedProducts, cat, category]);
 
   // Derived filter options from actual products
   const uniqueSuppliers = useMemo(() =>
@@ -111,13 +147,34 @@ function CategoryPage() {
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
       <nav className="mb-4 text-xs text-mutedink">
         <Link to="/" className="hover:text-navy">Home</Link> <span className="mx-1">/</span>
-        <Link to="/products/tiles-flooring" className="hover:text-navy">Products</Link> <span className="mx-1">/</span>
+        <Link to="/products/$category" params={{ category: "tiles-flooring" }} className="hover:text-navy">Products</Link> <span className="mx-1">/</span>
         <span className="text-navy">{cat.name}</span>
       </nav>
       <h1 className="font-display text-3xl font-extrabold text-navy sm:text-4xl">{cat.name}</h1>
       <p className="mt-2 text-sm text-mutedink">
         <span className="font-mono-data text-charcoal">{isLoading ? "…" : categoryProducts.length}</span> published products
       </p>
+
+      {/* Category selector navigation tabs */}
+      <div className="mt-6 flex flex-wrap gap-2 border-b border-border pb-4">
+        {CATEGORIES.map((c) => {
+          const isActive = c.slug === cat.slug;
+          return (
+            <Link
+              key={c.slug}
+              to="/products/$category"
+              params={{ category: c.slug }}
+              className={`rounded-full px-4 py-2 text-xs font-semibold transition-colors ${
+                isActive
+                  ? "bg-navy text-white shadow-sm"
+                  : "bg-secondary text-charcoal hover:bg-navy/10 hover:text-navy"
+              }`}
+            >
+              {c.name}
+            </Link>
+          );
+        })}
+      </div>
 
       <div className="mt-10 grid gap-10 lg:grid-cols-[260px_1fr]">
         {/* Filters sidebar */}

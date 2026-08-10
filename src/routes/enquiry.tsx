@@ -80,7 +80,7 @@ function EnquiryPage() {
         </div>
         <div className="mt-8 flex flex-wrap justify-center gap-3">
           <button onClick={() => { setSubmitted(false); setReference(""); formRef.current?.reset(); }} className="rounded-md border border-navy px-5 py-2.5 text-sm font-semibold text-navy hover:bg-navy hover:text-white">Submit Another Enquiry</button>
-          <Link to="/products/tiles-flooring" className="rounded-md bg-navy px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#1A5491]">Browse More Products</Link>
+          <Link to="/products/$category" params={{ category: "tiles-flooring" }} className="rounded-md bg-navy px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#1A5491]">Browse More Products</Link>
         </div>
       </div>
     );
