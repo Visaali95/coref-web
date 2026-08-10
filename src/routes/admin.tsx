@@ -73,6 +73,7 @@ type UploadRow = {
   supplier: string;
   fobPrice: string;
   leadTime: string;
+  imageUrl?: string | null;
   status: string;
 };
 
@@ -82,6 +83,7 @@ type PdfSuggestion = {
   supplier?: string;
   fobPrice?: string;
   leadTime?: string;
+  imageUrl?: string | null;
 };
 
 // ─── Status badge helpers ──────────────────────────────────────────────────────
@@ -305,6 +307,7 @@ function UploadPage() {
         supplier: suggestion.supplier ?? "",
         fobPrice: suggestion.fobPrice ?? "",
         leadTime: suggestion.leadTime ?? "",
+        imageUrl: suggestion.imageUrl ?? null,
         status: "Draft",
       }));
       setRows(nextRows);
@@ -349,6 +352,7 @@ function UploadPage() {
       supplier: row.supplier || "Unknown Supplier",
       fobPrice: row.fobPrice || "TBD",
       leadTime: row.leadTime || undefined,
+      imageUrl: row.imageUrl || undefined,
       status,
     }));
   };
@@ -446,6 +450,7 @@ function UploadPage() {
                 <thead className="bg-offwhite text-mutedink">
                   <tr>
                     <th className="px-3 py-2"><input type="checkbox" checked={rows.length > 0 && selected.size === rows.length} onChange={(event) => setSelected(event.target.checked ? new Set(rows.map((row) => row.id)) : new Set())} /></th>
+                    <th className="px-3 py-2">Image</th>
                     <th className="px-3 py-2">Product Name</th>
                     <th className="px-3 py-2">Category</th>
                     <th className="px-3 py-2">Supplier</th>
@@ -458,6 +463,13 @@ function UploadPage() {
                   {rows.map((row) => (
                     <tr key={row.id} className="border-t border-border align-middle">
                       <td className="px-3 py-2"><input type="checkbox" checked={selected.has(row.id)} onChange={() => toggleItem(row.id)} /></td>
+                      <td className="px-3 py-2">
+                        {row.imageUrl ? (
+                          <img src={apiUrl(row.imageUrl)} alt="" className="h-9 w-12 rounded object-cover border border-border" />
+                        ) : (
+                          <div className="h-9 w-12 rounded bg-secondary grid place-items-center text-[10px] text-mutedink font-medium">No img</div>
+                        )}
+                      </td>
                       <td className="px-3 py-2"><input value={row.name} onChange={(event) => handleRowChange(row.id, "name", event.target.value)} className="w-72 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
                       <td className="px-3 py-2"><input value={row.category} onChange={(event) => handleRowChange(row.id, "category", event.target.value)} className="w-40 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
                       <td className="px-3 py-2"><input value={row.supplier} onChange={(event) => handleRowChange(row.id, "supplier", event.target.value)} className="w-40 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>

@@ -17,7 +17,7 @@ router.post("/pdf", pdfUpload.single("file"), async (req, res) => {
   if (!file) return res.status(400).json({ message: "PDF file is required" });
 
   try {
-    const suggestions = await parsePdfBuffer(file.buffer);
+    const suggestions = await parsePdfBuffer(file.buffer, file.originalname);
     res.json({ suggestions });
   } catch (error) {
     console.error(error);
