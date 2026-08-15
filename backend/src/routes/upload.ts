@@ -64,4 +64,61 @@ router.post("/image", imageUpload.single("image"), (req, res) => {
   res.json({ imageUrl });
 });
 
+// ─── General Document Upload (PDF, Images, CAD/DWG, Excel, Word, ZIP, etc.) ────
+
+const documentStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+  filename: (_req, file, cb) => {
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const ext = path.extname(file.originalname).toLowerCase() || "";
+    cb(null, `doc-${unique}${ext}`);
+  },
+});
+
+const ALLOWED_EXTENSIONS = new Set([
+  ".pdf", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg",
+  ".xls", ".xlsx", ".csv", ".doc", ".docx", ".dwg", ".dxf", ".zip", ".txt"
+]);
+
+const documentUpload = multer({
+  storage: documentStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB limit
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ALLOWED_EXTENSIONS.has(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`File type '${ext}' is not allowed. Please upload PDF, Image, Excel, Word, DWG, or ZIP files.`));
+    }
+  },
+});
+
+router.post("/document", documentUpload.single("file"), (req, res) => {
+  const file = req.file;
+  if (!file) return res.status(400).json({ message: "No file uploaded" });
+
+  const url = `/uploads/${file.filename}`;
+  res.json({
+    url,
+    originalName: file.originalname,
+    size: file.size,
+    mimeType: file.mimetype,
+  });
+});
+
+router.post("/documents", documentUpload.array("files", 10), (req, res) => {
+  const files = req.files as Express.Multer.File[];
+  if (!files || files.length === 0) return res.status(400).json({ message: "No files uploaded" });
+
+  const uploaded = files.map((file) => ({
+    url: `/uploads/${file.filename}`,
+    originalName: file.originalname,
+    size: file.size,
+    mimeType: file.mimetype,
+  }));
+
+  res.json({ files: uploaded });
+});
+
 export default router;
+

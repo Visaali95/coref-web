@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Info, Check, Loader2 } from "lucide-react";
+import { Info, Check, Loader2, X } from "lucide-react";
 import { getCategory, CATEGORIES, PRODUCTS } from "@/lib/catalog";
 import { useEnquiry } from "@/lib/enquiry";
 import { apiFetch } from "@/lib/api";
@@ -261,9 +261,135 @@ function CheckRow({ label, checked, onChange }: { label: string; checked: boolea
   );
 }
 
+// ─── Product Detail Modal ───────────────────────────────────────────────────────
+
+function ProductDetailModal({ p, image, onClose }: { p: DbProduct; image: string; onClose: () => void }) {
+  const { add, has } = useEnquiry();
+  const added = has(String(p.id));
+
+  // Lock body scroll while modal is open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  // Close on Escape key
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+      style={{ animation: "fadeIn 0.18s ease" }}
+      onClick={onClose}
+    >
+      {/* Modal panel */}
+      <div
+        className="relative w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl"
+        style={{ animation: "slideUp 0.22s cubic-bezier(0.16,1,0.3,1)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-sm hover:bg-black/60 transition-colors"
+        >
+          <X className="h-4 w-4" />
+        </button>
+
+        {/* Product image */}
+        <div className="aspect-[16/9] w-full overflow-hidden bg-secondary">
+          <img
+            src={image}
+            alt={p.name}
+            className="h-full w-full object-cover"
+          />
+        </div>
+
+        {/* Content */}
+        <div className="p-6">
+          {/* Category + supplier badges */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-navy/10 px-3 py-0.5 text-xs font-semibold text-navy">
+              {p.category}
+            </span>
+            <span className="rounded-full bg-secondary px-3 py-0.5 text-xs text-charcoal">
+              {p.supplier || "Supplier"}
+            </span>
+          </div>
+
+          {/* Name */}
+          <h2 className="mt-3 font-display text-xl font-extrabold leading-tight text-navy">
+            {p.name}
+          </h2>
+
+          {/* Price & lead time */}
+          <div className="mt-4 rounded-xl border border-border bg-offwhite p-4">
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-mutedink">FOB Price</div>
+                <div className="mt-1 font-mono-data text-lg font-bold text-navy">
+                  {p.fobPrice || "POA"}
+                </div>
+              </div>
+              {p.leadTime && (
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wider text-mutedink">Lead Time</div>
+                  <div className="mt-1 inline-flex items-center gap-1 rounded-md bg-ocean/15 px-2 py-0.5 font-mono-data text-sm font-semibold text-navy">
+                    ⏱ {p.leadTime}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <button
+              onClick={() => {
+                add({ id: String(p.id), name: p.name, spec: p.category, origin: p.supplier, image });
+                onClose();
+              }}
+              disabled={added}
+              className={`rounded-md py-2.5 text-sm font-semibold transition-colors ${
+                added
+                  ? "bg-green text-white"
+                  : "bg-navy text-white hover:bg-[#1A5491]"
+              }`}
+            >
+              {added ? "✓ Added to Enquiry" : "+ Add to Enquiry"}
+            </button>
+            <Link
+              to="/enquiry"
+              onClick={onClose}
+              className="rounded-md border border-navy py-2.5 text-center text-sm font-semibold text-navy hover:bg-navy hover:text-white transition-colors"
+            >
+              Request a Quote
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      {/* Keyframe styles injected inline */}
+      <style>{`
+        @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(24px) scale(0.97) } to { opacity: 1; transform: translateY(0) scale(1) } }
+      `}</style>
+    </div>
+  );
+}
+
+// ─── Product Card ───────────────────────────────────────────────────────────────
+
 function ProductCard({ p }: { p: DbProduct }) {
   const { add, has } = useEnquiry();
   const added = has(String(p.id));
+  const [showModal, setShowModal] = useState(false);
 
   // Use the real uploaded image if available, otherwise fall back to a deterministic placeholder
   const image = p.imageUrl
@@ -271,49 +397,55 @@ function ProductCard({ p }: { p: DbProduct }) {
     : `https://picsum.photos/seed/prod-${p.id}/900/600`;
 
   return (
-    <div className="group flex flex-col overflow-hidden rounded-xl border border-border bg-white transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-navy/5">
-      <div className="aspect-[16/10] overflow-hidden bg-secondary">
-        <img src={image} alt={p.name} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
-      </div>
-      <div className="flex flex-1 flex-col gap-2 p-4">
-        <div className="flex items-center justify-between gap-2">
-          <span className="rounded-full bg-secondary px-2 py-0.5 text-xs truncate max-w-[55%]">{p.supplier || "Supplier"}</span>
-          <span className="rounded-full bg-green/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green">Published</span>
+    <>
+      {showModal && (
+        <ProductDetailModal p={p} image={image} onClose={() => setShowModal(false)} />
+      )}
+
+      <div className="group flex flex-col overflow-hidden rounded-xl border border-border bg-white transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-navy/5">
+        <div className="aspect-[16/10] overflow-hidden bg-secondary">
+          <img src={image} alt={p.name} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
         </div>
-        <p className="font-display text-base font-bold text-navy line-clamp-2">{p.name}</p>
-        <div className="mt-1 flex items-center gap-1.5 text-sm">
-          <span className="font-mono-data font-semibold text-navy">{p.fobPrice || "POA"}</span>
-          <span className="text-xs text-mutedink">(FOB)</span>
-          <span title="Free on Board: price excludes freight & duties">
-            <Info className="h-3.5 w-3.5 text-mutedink" />
-          </span>
-        </div>
-        {p.leadTime && (
-          <div>
-            <span className="inline-flex items-center rounded-md bg-ocean/15 px-2 py-0.5 font-mono-data text-xs text-navy">
-              ⏱ {p.leadTime}
+        <div className="flex flex-1 flex-col gap-2 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <span className="rounded-full bg-secondary px-2 py-0.5 text-xs truncate max-w-[55%]">{p.supplier || "Supplier"}</span>
+            <span className="rounded-full bg-green/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green">Published</span>
+          </div>
+          <p className="font-display text-base font-bold text-navy line-clamp-2">{p.name}</p>
+          <div className="mt-1 flex items-center gap-1.5 text-sm">
+            <span className="font-mono-data font-semibold text-navy">{p.fobPrice || "POA"}</span>
+            <span className="text-xs text-mutedink">(FOB)</span>
+            <span title="Free on Board: price excludes freight &amp; duties">
+              <Info className="h-3.5 w-3.5 text-mutedink" />
             </span>
           </div>
-        )}
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <Link
-            to="/admin"
-            search={{ tab: "catalogue" } as never}
-            className="rounded-md bg-navy py-2 text-center text-xs font-semibold text-white hover:bg-[#1A5491]"
-          >
-            View Details
-          </Link>
-          <button
-            onClick={() => add({ id: String(p.id), name: p.name, spec: p.category, origin: p.supplier, image })}
-            disabled={added}
-            className={`rounded-md border py-2 text-xs font-semibold transition-colors ${
-              added ? "border-green bg-green text-white" : "border-navy text-navy hover:bg-navy hover:text-white"
-            }`}
-          >
-            {added ? (<span className="inline-flex items-center gap-1"><Check className="h-3 w-3" /> Added</span>) : "+ Add to Enquiry"}
-          </button>
+          {p.leadTime && (
+            <div>
+              <span className="inline-flex items-center rounded-md bg-ocean/15 px-2 py-0.5 font-mono-data text-xs text-navy">
+                ⏱ {p.leadTime}
+              </span>
+            </div>
+          )}
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setShowModal(true)}
+              className="rounded-md bg-navy py-2 text-center text-xs font-semibold text-white hover:bg-[#1A5491] transition-colors"
+            >
+              View Details
+            </button>
+            <button
+              onClick={() => add({ id: String(p.id), name: p.name, spec: p.category, origin: p.supplier, image })}
+              disabled={added}
+              className={`rounded-md border py-2 text-xs font-semibold transition-colors ${
+                added ? "border-green bg-green text-white" : "border-navy text-navy hover:bg-navy hover:text-white"
+              }`}
+            >
+              {added ? (<span className="inline-flex items-center gap-1"><Check className="h-3 w-3" />Added</span>) : "+ Add to Enquiry"}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
+

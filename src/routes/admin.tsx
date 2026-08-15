@@ -20,6 +20,10 @@ import {
   Globe,
   FileText,
   Loader2,
+  Paperclip,
+  ExternalLink,
+  AlertCircle,
+  CheckCircle,
 } from "lucide-react";
 import { CorefLogo } from "@/components/coref/Logo";
 import { apiFetch, apiUrl } from "@/lib/api";
@@ -36,6 +40,9 @@ export const Route = createFileRoute("/admin")({
 });
 
 type Nav = "catalogue" | "upload" | "suppliers" | "enquiries" | "settings";
+
+// ─── Shared category list (single source of truth across all admin UI) ──────────
+const CATEGORIES = ["Tiles & Flooring", "Sanitaryware", "Machinery", "Surface Finishes", "Structural", "Lighting", "Other"];
 
 type Product = {
   id: number;
@@ -60,6 +67,7 @@ type Enquiry = {
   role: string;
   items: string;
   message: string;
+  attachments?: string | null;
   submittedAt: string;
   status: string;
   email?: string;
@@ -281,6 +289,7 @@ function UploadPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [defaultCategory, setDefaultCategory] = useState(CATEGORIES[0]);
   const queryClient = useQueryClient();
 
   const uploadMutation = useMutation({
@@ -303,7 +312,8 @@ function UploadPage() {
       const nextRows = data.suggestions.map((suggestion, index) => ({
         id: index + 1,
         name: suggestion.name,
-        category: suggestion.category,
+        // Use pixel-classified category if present, otherwise fall back to defaultCategory
+        category: suggestion.category || defaultCategory,
         supplier: suggestion.supplier ?? "",
         fobPrice: suggestion.fobPrice ?? "",
         leadTime: suggestion.leadTime ?? "",
@@ -408,7 +418,12 @@ function UploadPage() {
 
           <div className="grid gap-4 sm:grid-cols-3">
             <Field label="Supplier Name" placeholder="Guangdong Elite Ceramics" readOnly value="" />
-            <SelectField label="Default Category" options={["Tiles & Flooring", "Sanitaryware", "Machinery", "Surface Finishes", "Structural", "Lighting", "Other"]} value="Tiles & Flooring" onChange={() => undefined} />
+            <SelectField
+              label="Default Category (fallback when AI can't classify)"
+              options={CATEGORIES}
+              value={defaultCategory}
+              onChange={(e) => setDefaultCategory(e.target.value)}
+            />
             <Field label="Default Origin" defaultValue="🇨🇳 China" readOnly />
           </div>
 
@@ -471,7 +486,17 @@ function UploadPage() {
                         )}
                       </td>
                       <td className="px-3 py-2"><input value={row.name} onChange={(event) => handleRowChange(row.id, "name", event.target.value)} className="w-72 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
-                      <td className="px-3 py-2"><input value={row.category} onChange={(event) => handleRowChange(row.id, "category", event.target.value)} className="w-40 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
+                      <td className="px-3 py-2">
+                        <select
+                          value={row.category}
+                          onChange={(event) => handleRowChange(row.id, "category", event.target.value)}
+                          className="w-40 rounded border border-transparent bg-transparent px-2 py-1 text-xs hover:border-input focus:border-ocean focus:bg-white focus:outline-none"
+                        >
+                          {CATEGORIES.map((cat) => (
+                            <option key={cat} value={cat}>{cat}</option>
+                          ))}
+                        </select>
+                      </td>
                       <td className="px-3 py-2"><input value={row.supplier} onChange={(event) => handleRowChange(row.id, "supplier", event.target.value)} className="w-40 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
                       <td className="px-3 py-2"><input value={row.fobPrice} onChange={(event) => handleRowChange(row.id, "fobPrice", event.target.value)} className="w-24 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
                       <td className="px-3 py-2"><input value={row.leadTime} onChange={(event) => handleRowChange(row.id, "leadTime", event.target.value)} className="w-28 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
@@ -519,6 +544,44 @@ function UploadPage() {
 const PRODUCT_STATUS_TABS = ["All", "Published", "Draft", "Needs Review"] as const;
 type ProductStatusTab = typeof PRODUCT_STATUS_TABS[number];
 
+// ─── Product Validation Helpers ───────────────────────────────────────────────
+function validateProductName(v: string): string | null {
+  const s = v.trim();
+  if (!s) return "Product name is required.";
+  if (s.length < 2) return "Product name must be at least 2 characters.";
+  if (s.length > 150) return "Product name must be 150 characters or fewer.";
+  return null;
+}
+
+function validateSupplierName(v: string): string | null {
+  const s = v.trim();
+  if (!s) return "Supplier name is required.";
+  if (s.length < 2) return "Supplier name must be at least 2 characters.";
+  if (s.length > 100) return "Supplier name must be 100 characters or fewer.";
+  return null;
+}
+
+function validateFobPrice(v: string): string | null {
+  const s = v.trim();
+  if (!s) return "FOB price is required.";
+  if (s.length < 2) return "Please enter a valid price (e.g. $120 / sqm or POA).";
+  return null;
+}
+
+function validateCategory(v: string): string | null {
+  if (!v || !v.trim()) return "Category is required.";
+  return null;
+}
+
+function validateImageFile(file: File | null, existingUrl?: string | null): string | null {
+  if (!file && !existingUrl) return "Product image is required.";
+  if (!file) return null;
+  const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+  if (!allowed.includes(file.type)) return "Only JPEG, PNG, WEBP, and GIF images are allowed.";
+  if (file.size > 10 * 1024 * 1024) return "Image size exceeds 10 MB limit.";
+  return null;
+}
+
 function CataloguePage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
@@ -535,6 +598,8 @@ function CataloguePage() {
     imageUrl: null,
     status: "Draft",
   });
+  const [createTouched, setCreateTouched] = useState<Record<string, boolean>>({});
+  const [imageError, setImageError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
 
@@ -544,8 +609,33 @@ function CataloguePage() {
   const [imageUploading, setImageUploading] = useState(false);
   const [imageDragOver, setImageDragOver] = useState(false);
 
+  // ─── Real-time validation computation ──────────────────────────────────────
+  const createErrors = useMemo(() => ({
+    name: validateProductName(newProduct.name),
+    supplier: validateSupplierName(newProduct.supplier),
+    fobPrice: validateFobPrice(newProduct.fobPrice),
+    category: validateCategory(newProduct.category),
+    image: validateImageFile(imageFile, newProduct.imageUrl),
+  }), [newProduct, imageFile]);
+
+  const isCreateValid = Object.values(createErrors).every((e) => e === null);
+
+  const handleTouchField = (field: string) => {
+    setCreateTouched((prev) => ({ ...prev, [field]: true }));
+  };
+
+  const touchAllCreateFields = () => {
+    setCreateTouched({ name: true, supplier: true, fobPrice: true, category: true, image: true });
+  };
+
   const handleImageSelect = (file: File | null) => {
     if (!file) return;
+    const err = validateImageFile(file);
+    if (err) {
+      setImageError(err);
+      return;
+    }
+    setImageError(null);
     setImageFile(file);
     const reader = new FileReader();
     reader.onload = (e) => setImagePreview(e.target?.result as string);
@@ -555,6 +645,7 @@ function CataloguePage() {
   const clearImage = () => {
     setImageFile(null);
     setImagePreview(null);
+    setImageError(null);
     setNewProduct((prev) => ({ ...prev, imageUrl: null }));
   };
 
@@ -570,6 +661,7 @@ function CataloguePage() {
       queryClient.invalidateQueries({ queryKey: ["products", "published"] });
       setShowCreate(false);
       setNewProduct({ name: "", category: "Tiles & Flooring", supplier: "", fobPrice: "", leadTime: "", imageUrl: null, status: "Draft" });
+      setCreateTouched({});
       clearImage();
       setToast("Product created successfully.");
       setTimeout(() => setToast(null), 3000);
@@ -577,6 +669,13 @@ function CataloguePage() {
   });
 
   const handleCreateProduct = async () => {
+    touchAllCreateFields();
+    if (!isCreateValid) {
+      setToast("Please fix all validation errors before saving.");
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
+
     let finalImageUrl: string | null = newProduct.imageUrl ?? null;
     if (imageFile) {
       setImageUploading(true);
@@ -651,7 +750,7 @@ function CataloguePage() {
     updateMutation.mutate({ id, data: editValues });
   };
 
-  const CATEGORIES = ["Tiles & Flooring", "Sanitaryware", "Machinery", "Surface Finishes", "Structural", "Lighting", "Other"];
+  // CATEGORIES is defined at the top of this file — shared across all admin sections
 
   return (
     <div>
@@ -675,13 +774,21 @@ function CataloguePage() {
 
           {/* Image Picker */}
           <div className="mb-5">
-            <span className="block text-xs font-semibold uppercase tracking-wider text-mutedink">Product Image</span>
+            <span className="block text-xs font-semibold uppercase tracking-wider text-mutedink">
+              Product Image <span className="text-red-500">*</span>
+            </span>
             <div
               onDragOver={(e) => { e.preventDefault(); setImageDragOver(true); }}
               onDragLeave={() => setImageDragOver(false)}
               onDrop={(e) => { e.preventDefault(); setImageDragOver(false); handleImageSelect(e.dataTransfer.files[0] ?? null); }}
               className={`mt-1 relative flex min-h-[140px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed transition-colors ${
-                imageDragOver ? "border-ocean bg-ocean/5" : imagePreview ? "border-ocean/40 bg-offwhite" : "border-input bg-white hover:border-ocean/60"
+                (createTouched.image || imageError) && createErrors.image
+                  ? "border-red-400 bg-red-50/20"
+                  : imageDragOver
+                  ? "border-ocean bg-ocean/5"
+                  : imagePreview
+                  ? "border-ocean/40 bg-offwhite"
+                  : "border-input bg-white hover:border-ocean/60"
               }`}
             >
               {imagePreview ? (
@@ -706,48 +813,171 @@ function CataloguePage() {
                   />
                   <UploadCloud className="h-10 w-10 text-navy/40" />
                   <span className="text-sm font-semibold text-navy">Drag & drop or click to upload</span>
-                  <span className="text-xs text-mutedink">JPEG, PNG, WEBP · max 10 MB</span>
+                  <span className="text-xs text-mutedink">JPEG, PNG, WEBP, GIF · max 10 MB</span>
                 </label>
               )}
             </div>
+            {((createTouched.image || imageError) && createErrors.image) && (
+              <div className="mt-2 flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{createErrors.image}</span>
+              </div>
+            )}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Product Name" value={newProduct.name} onChange={(event) => setNewProduct((prev) => ({ ...prev, name: event.target.value }))} />
-            <Field label="Supplier" value={newProduct.supplier} onChange={(event) => setNewProduct((prev) => ({ ...prev, supplier: event.target.value }))} />
-            <Field label="FOB Price" value={newProduct.fobPrice} onChange={(event) => setNewProduct((prev) => ({ ...prev, fobPrice: event.target.value }))} />
-            <Field label="Lead Time (optional)" value={newProduct.leadTime ?? ""} onChange={(event) => setNewProduct((prev) => ({ ...prev, leadTime: event.target.value }))} />
-            <SelectField
-              label="Category"
-              options={CATEGORIES}
-              value={newProduct.category}
-              onChange={(event) => setNewProduct((prev) => ({ ...prev, category: event.target.value }))}
-            />
-            <label className="block">
-              <span className="block text-xs font-semibold uppercase tracking-wider text-mutedink">Status</span>
+            {/* Product Name */}
+            <div className="flex flex-col gap-1">
+              <span className="block text-xs font-semibold uppercase tracking-wider text-mutedink">
+                Product Name <span className="text-red-500">*</span>
+              </span>
+              <input
+                type="text"
+                placeholder="e.g. Carrara White Porcelain Tile"
+                value={newProduct.name}
+                onChange={(e) => setNewProduct((prev) => ({ ...prev, name: e.target.value }))}
+                onBlur={() => handleTouchField("name")}
+                className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none transition-colors bg-white ${
+                  createTouched.name && createErrors.name
+                    ? "border-red-400 focus:border-red-500 bg-red-50/30"
+                    : newProduct.name.trim() && !createErrors.name
+                    ? "border-green/60 focus:border-green"
+                    : "border-input focus:border-ocean"
+                }`}
+              />
+              {createTouched.name && createErrors.name && (
+                <span className="flex items-center gap-1 text-xs text-red-600">
+                  <AlertCircle className="h-3 w-3 shrink-0" />
+                  {createErrors.name}
+                </span>
+              )}
+            </div>
+
+            {/* Supplier */}
+            <div className="flex flex-col gap-1">
+              <span className="block text-xs font-semibold uppercase tracking-wider text-mutedink">
+                Supplier <span className="text-red-500">*</span>
+              </span>
+              <input
+                type="text"
+                placeholder="e.g. Guangdong Elite Ceramics"
+                value={newProduct.supplier}
+                onChange={(e) => setNewProduct((prev) => ({ ...prev, supplier: e.target.value }))}
+                onBlur={() => handleTouchField("supplier")}
+                className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none transition-colors bg-white ${
+                  createTouched.supplier && createErrors.supplier
+                    ? "border-red-400 focus:border-red-500 bg-red-50/30"
+                    : newProduct.supplier.trim() && !createErrors.supplier
+                    ? "border-green/60 focus:border-green"
+                    : "border-input focus:border-ocean"
+                }`}
+              />
+              {createTouched.supplier && createErrors.supplier && (
+                <span className="flex items-center gap-1 text-xs text-red-600">
+                  <AlertCircle className="h-3 w-3 shrink-0" />
+                  {createErrors.supplier}
+                </span>
+              )}
+            </div>
+
+            {/* FOB Price */}
+            <div className="flex flex-col gap-1">
+              <span className="block text-xs font-semibold uppercase tracking-wider text-mutedink">
+                FOB Price <span className="text-red-500">*</span>
+              </span>
+              <input
+                type="text"
+                placeholder="e.g. $120–$180 / sqm"
+                value={newProduct.fobPrice}
+                onChange={(e) => setNewProduct((prev) => ({ ...prev, fobPrice: e.target.value }))}
+                onBlur={() => handleTouchField("fobPrice")}
+                className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none transition-colors bg-white ${
+                  createTouched.fobPrice && createErrors.fobPrice
+                    ? "border-red-400 focus:border-red-500 bg-red-50/30"
+                    : newProduct.fobPrice.trim() && !createErrors.fobPrice
+                    ? "border-green/60 focus:border-green"
+                    : "border-input focus:border-ocean"
+                }`}
+              />
+              {createTouched.fobPrice && createErrors.fobPrice && (
+                <span className="flex items-center gap-1 text-xs text-red-600">
+                  <AlertCircle className="h-3 w-3 shrink-0" />
+                  {createErrors.fobPrice}
+                </span>
+              )}
+            </div>
+
+            {/* Lead Time (optional) */}
+            <div className="flex flex-col gap-1">
+              <span className="block text-xs font-semibold uppercase tracking-wider text-mutedink">
+                Lead Time <span className="font-normal normal-case text-[10px] text-mutedink">(optional)</span>
+              </span>
+              <input
+                type="text"
+                placeholder="e.g. 4–6 weeks"
+                value={newProduct.leadTime ?? ""}
+                onChange={(e) => setNewProduct((prev) => ({ ...prev, leadTime: e.target.value }))}
+                className="w-full rounded-md border border-input bg-white px-3 py-2.5 text-sm outline-none focus:border-ocean"
+              />
+            </div>
+
+            {/* Category */}
+            <div className="flex flex-col gap-1">
+              <span className="block text-xs font-semibold uppercase tracking-wider text-mutedink">
+                Category <span className="text-red-500">*</span>
+              </span>
+              <select
+                value={newProduct.category}
+                onChange={(e) => setNewProduct((prev) => ({ ...prev, category: e.target.value }))}
+                onBlur={() => handleTouchField("category")}
+                className="w-full rounded-md border border-input bg-white px-3 py-2.5 text-sm outline-none focus:border-ocean"
+              >
+                {CATEGORIES.map((cat) => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Status */}
+            <div className="flex flex-col gap-1">
+              <span className="block text-xs font-semibold uppercase tracking-wider text-mutedink">
+                Status <span className="text-red-500">*</span>
+              </span>
               <select
                 value={newProduct.status}
                 onChange={(e) => setNewProduct((prev) => ({ ...prev, status: e.target.value }))}
-                className="mt-1 w-full rounded-md border border-input bg-white px-3 py-2.5 text-sm outline-none focus:border-ocean"
+                className="w-full rounded-md border border-input bg-white px-3 py-2.5 text-sm outline-none focus:border-ocean"
               >
                 <option>Draft</option>
                 <option>Published</option>
                 <option>Needs Review</option>
               </select>
-            </label>
+            </div>
           </div>
+
+          {/* Inline warning banner when trying to submit invalid form */}
+          {!isCreateValid && Object.values(createTouched).some(Boolean) && (
+            <div className="mt-4 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>Please fill in all required fields marked with * before saving.</span>
+            </div>
+          )}
 
           <div className="mt-5 flex gap-3">
             <button
               onClick={handleCreateProduct}
               disabled={createMutation.isPending || imageUploading}
-              className="inline-flex items-center gap-2 rounded-md bg-navy px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#1A5491] disabled:cursor-not-allowed disabled:opacity-60"
+              className={`inline-flex items-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold text-white transition-all ${
+                !isCreateValid && Object.values(createTouched).some(Boolean)
+                  ? "bg-red-300 cursor-not-allowed text-white"
+                  : "bg-navy hover:bg-[#1A5491] disabled:cursor-not-allowed disabled:opacity-60"
+              }`}
             >
               {(createMutation.isPending || imageUploading) && <Loader2 className="h-4 w-4 animate-spin" />}
               {imageUploading ? "Uploading image…" : createMutation.isPending ? "Saving…" : "Save Product"}
             </button>
             <button
-              onClick={() => { setShowCreate(false); clearImage(); }}
+              onClick={() => { setShowCreate(false); setCreateTouched({}); clearImage(); }}
               className="rounded-md border border-input px-5 py-2.5 text-sm font-semibold text-navy hover:bg-slate-50"
             >
               Cancel
@@ -902,6 +1132,32 @@ function CataloguePage() {
 // ─── Enquiries Page ────────────────────────────────────────────────────────────
 const ENQUIRY_STATUSES = ["All", "New", "In Progress", "Quoted", "Closed"] as const;
 type EnquiryStatus = typeof ENQUIRY_STATUSES[number];
+
+type AttachmentItem = {
+  name: string;
+  url: string;
+  size?: number;
+};
+
+function parseAttachments(raw?: string | null): AttachmentItem[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {}
+  if (typeof raw === "string" && raw.trim()) {
+    return [{ name: "Attached Document", url: raw.trim() }];
+  }
+  return [];
+}
+
+function formatFileSizeAdmin(bytes?: number): string {
+  if (!bytes) return "";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
 
 function EnquiriesPage() {
   const queryClient = useQueryClient();
@@ -1092,6 +1348,49 @@ function EnquiriesPage() {
                             <p className="mt-1 font-mono-data text-xs text-charcoal">{new Date(enquiry.submittedAt).toLocaleString()}</p>
                           </div>
                         </div>
+
+                        {/* Uploaded Documents / Attachments section */}
+                        {parseAttachments(enquiry.attachments).length > 0 && (
+                          <div className="sm:col-span-2 lg:col-span-3 border-t border-border/80 pt-4 mt-2">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-mutedink mb-2">
+                              Uploaded Documents / Attachments ({parseAttachments(enquiry.attachments).length})
+                            </p>
+                            <div className="flex flex-wrap gap-3">
+                              {parseAttachments(enquiry.attachments).map((att, idx) => {
+                                const fileUrl = att.url.startsWith("http") ? att.url : apiUrl(att.url);
+                                const isImage = /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(att.name || att.url);
+                                const ext = ((att.name || att.url).split(".").pop() || "FILE").toUpperCase();
+
+                                return (
+                                  <a
+                                    key={idx}
+                                    href={fileUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="group flex items-center gap-3 rounded-lg border border-border bg-white p-2.5 text-xs font-medium text-navy hover:border-ocean hover:bg-slate-50 transition-all shadow-sm max-w-xs"
+                                  >
+                                    {isImage ? (
+                                      <img src={fileUrl} alt={att.name} className="h-10 w-10 rounded object-cover border border-border shrink-0" />
+                                    ) : (
+                                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded bg-ocean/10 text-ocean font-bold font-mono text-[10px]">
+                                        {ext.slice(0, 4)}
+                                      </div>
+                                    )}
+                                    <div className="min-w-0 flex-1">
+                                      <div className="truncate font-semibold text-navy group-hover:text-ocean" title={att.name}>
+                                        {att.name || "Attachment"}
+                                      </div>
+                                      <div className="text-[10px] text-mutedink flex items-center gap-1 font-mono">
+                                        {att.size ? formatFileSizeAdmin(att.size) : "Click to view"}
+                                        <ExternalLink className="h-3 w-3 inline text-ocean ml-1" />
+                                      </div>
+                                    </div>
+                                  </a>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </td>
                   </tr>

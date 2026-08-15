@@ -28,6 +28,7 @@ model Enquiry {
   role        String
   items       String
   message     String
+  attachments String?
   submittedAt DateTime @default(now())
   status      String   @default("New")
   email       String?

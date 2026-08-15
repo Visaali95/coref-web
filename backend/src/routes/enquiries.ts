@@ -14,6 +14,7 @@ const enquiryCreateSchema = z.object({
   phone: z.string().optional(),
   items: z.string().min(1),
   message: z.string().min(1),
+  attachments: z.string().optional(),
 });
 
 router.get("/", async (req, res) => {
@@ -38,8 +39,15 @@ router.post("/", async (req, res) => {
   const reference = `ENQ-${dateStr}-${suffix}`;
 
   try {
-    const { email, phone, ...rest } = result.data;
-    const enquiry = await createEnquiry({ ...rest, reference, status: "New", email: email ?? null, phone: phone ?? null });
+    const { email, phone, attachments, ...rest } = result.data;
+    const enquiry = await createEnquiry({
+      ...rest,
+      reference,
+      status: "New",
+      email: email ?? null,
+      phone: phone ?? null,
+      attachments: attachments ?? null,
+    });
     res.status(201).json(enquiry);
   } catch (error) {
     console.error(error);
