@@ -12,6 +12,12 @@ export type ParsedProductSuggestion = {
   fobPrice: string;
   leadTime: string;
   imageUrl?: string | null;
+  /** Raw ML model label e.g. "Office Furniture" (undefined when ML service unavailable) */
+  mlLabel?: string;
+  /** ML model confidence 0-1 (undefined when ML service unavailable) */
+  mlConfidence?: number;
+  /** "classified" | "needs_review" | "failed" | "heuristic" */
+  mlStatus?: string;
 };
 
 // ─── Known product catalogue categories ───────────────────────────────────────
@@ -483,20 +489,41 @@ async function extractTextFromPdf(buffer: Buffer, extractedImageUrls: string[]):
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-export const parsePdfBuffer = async (buffer: Buffer, filename?: string): Promise<ParsedProductSuggestion[]> => {
+/**
+ * Main entry point called by the upload route.
+ *
+ * @param buffer        Raw PDF bytes
+ * @param filename      Original filename (for supplier heuristic & logging)
+ * @param mlByPage      Optional per-page classification map from the ML service.
+ *                      Key = 1-based page number.
+ *                      When provided, ML categories replace the pixel heuristic.
+ */
+export const parsePdfBuffer = async (
+  buffer: Buffer,
+  filename?: string,
+  mlByPage?: Map<number, { category: string; mlLabel: string; confidence: number; mlStatus: string }>
+): Promise<ParsedProductSuggestion[]> => {
   const supplier = extractSupplierName(filename);
 
   // Step 1: One unique rendered image per PDF page
   const extractedImageEntries = await extractPdfPageImages(buffer);
   const extractedImageUrls = extractedImageEntries.map((e) => e.url);
 
-  // Step 2: Classify each page image by pixel statistics (parallel)
-  const imageCategories = await Promise.all(
-    extractedImageEntries.map((e) => classifyImageByPixels(e.imageBuffer))
-  );
-
+  // Step 2: Build category lookup from ML results (if available), otherwise
+  // fall back to the existing pixel-stats heuristic per image.
+  let imageCategories: Array<ProductCategory | null> | null = null;
   const imageCategoryMap = new Map<string, ProductCategory | null>();
-  extractedImageEntries.forEach((e, i) => imageCategoryMap.set(e.url, imageCategories[i]));
+
+  if (!mlByPage || mlByPage.size === 0) {
+    // Pixel-stats fallback path (ML service unavailable)
+    imageCategories = await Promise.all(
+      extractedImageEntries.map((e) => classifyImageByPixels(e.imageBuffer))
+    );
+    extractedImageEntries.forEach((e, i) =>
+      imageCategoryMap.set(e.url, imageCategories![i])
+    );
+  }
+  // When mlByPage IS available, we resolve category per suggestion below.
 
   // Step 3: Extract embedded text (digital PDF or OCR fallback)
   const rawText = await extractTextFromPdf(buffer, extractedImageUrls);
@@ -506,13 +533,19 @@ export const parsePdfBuffer = async (buffer: Buffer, filename?: string): Promise
   const seen = new Set<string>();
 
   let currentImage: string | null = extractedImageUrls[0] ?? null;
+  // Track page index (0-based) to correlate with ML page numbers
+  let currentPageIndex = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
     // OCR path: track which page image we're currently on
-    const pageMatch = line.match(/--- PAGE \d+ IMAGE: (\/uploads\/[^\s]+) ---/);
-    if (pageMatch) { currentImage = pageMatch[1]; continue; }
+    const pageMatch = line.match(/--- PAGE (\d+) IMAGE: (\/uploads\/[^\s]+) ---/);
+    if (pageMatch) {
+      currentPageIndex = Number(pageMatch[1]) - 1; // convert to 0-based
+      currentImage = pageMatch[2];
+      continue;
+    }
 
     const lower = line.toLowerCase();
 
@@ -542,18 +575,60 @@ export const parsePdfBuffer = async (buffer: Buffer, filename?: string): Promise
       }
     }
 
-    // Category: pixel classifier takes priority → text keyword fallback
-    const pixelCategory = currentImage ? (imageCategoryMap.get(currentImage) ?? null) : null;
-    const category: string = pixelCategory ?? suggestCategory(line + " " + filename);
+    // ── Category resolution ──────────────────────────────────────────────────
+    // Priority: ML service (per page) > pixel heuristic (per image) > text keyword
+    let category: string;
+    let mlLabel: string | undefined;
+    let mlConfidence: number | undefined;
+    let mlStatus: string | undefined;
 
-    suggestions.push({ name: line, category, supplier, fobPrice, leadTime, imageUrl: currentImage });
+    const mlPageNum = currentPageIndex + 1; // ML uses 1-based
+    const mlResult = mlByPage?.get(mlPageNum);
+
+    if (mlResult) {
+      category = mlResult.category;
+      mlLabel = mlResult.mlLabel;
+      mlConfidence = mlResult.confidence;
+      mlStatus = mlResult.mlStatus;
+    } else if (!mlByPage) {
+      // Pixel-stats fallback
+      const pixelCategory = currentImage ? (imageCategoryMap.get(currentImage) ?? null) : null;
+      category = pixelCategory ?? suggestCategory(line + " " + filename);
+      mlStatus = "heuristic";
+    } else {
+      // ML service ran but this page had no classified image → text keyword fallback
+      category = suggestCategory(line + " " + filename);
+      mlStatus = "heuristic";
+    }
+
+    suggestions.push({ name: line, category, supplier, fobPrice, leadTime, imageUrl: currentImage, mlLabel, mlConfidence, mlStatus });
   }
 
   // Sparse-text fallback: one product entry per unique page image
   if (suggestions.length === 0 && extractedImageEntries.length > 0) {
     const baseName = filename ? path.basename(filename, path.extname(filename)) : "Catalogue Item";
     extractedImageEntries.slice(0, 30).forEach((entry, idx) => {
-      const category: string = (imageCategoryMap.get(entry.url) ?? null) ?? suggestCategory(baseName);
+      const mlPageNum = idx + 1;
+      const mlResult = mlByPage?.get(mlPageNum);
+
+      let category: string;
+      let mlLabel: string | undefined;
+      let mlConfidence: number | undefined;
+      let mlStatus: string | undefined;
+
+      if (mlResult) {
+        category = mlResult.category;
+        mlLabel = mlResult.mlLabel;
+        mlConfidence = mlResult.confidence;
+        mlStatus = mlResult.mlStatus;
+      } else if (!mlByPage) {
+        category = (imageCategoryMap.get(entry.url) ?? null) ?? suggestCategory(baseName);
+        mlStatus = "heuristic";
+      } else {
+        category = suggestCategory(baseName);
+        mlStatus = "heuristic";
+      }
+
       suggestions.push({
         name: `${baseName} - Page ${idx + 1}`,
         category,
@@ -561,6 +636,9 @@ export const parsePdfBuffer = async (buffer: Buffer, filename?: string): Promise
         fobPrice: "$120–$350 / unit",
         leadTime: "4–6 weeks",
         imageUrl: entry.url,
+        mlLabel,
+        mlConfidence,
+        mlStatus,
       });
     });
   }

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Furniture ML — Admin Curation</title>
+<style>
+:root{color-scheme:dark}body{font-family:system-ui,sans-serif;margin:0;background:#11141a;color:#e8e8ef}
+header{position:sticky;top:0;background:#1b1e27;padding:10px 16px;border-bottom:1px solid #2c3040;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+button,select,input{background:#2b3242;color:#e8e8ef;border:1px solid #3b4356;border-radius:6px;padding:6px 10px;font-size:13px}
+button:hover{background:#39415a}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;padding:16px}
+.card{background:#1b1e27;border:1px solid #2c3040;border-radius:10px;padding:10px}
+.card img{width:100%;height:160px;object-fit:contain;background:#0d0f14;border-radius:6px}
+.meta{font-size:11px;color:#98a0b3;margin:6px 0;line-height:1.4;word-break:break-all}
+.row{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.pill{background:#2b3242;border-radius:20px;padding:3px 10px;font-size:12px}
+</style></head><body>
+<header>
+<strong>Admin curation</strong><span class="pill" id="summary"></span>
+<select id="fStatus"><option value="">all statuses</option><option value="needs_review">needs_review</option><option value="classified">classified</option><option value="failed">failed</option></select>
+<select id="fCat"><option value="">all categories</option><option>Office Furniture</option><option>Villa Furniture</option><option>Chandelier</option></select>
+<button onclick="loadProducts()">Refresh</button>
+<button onclick="runClustering()">Run clustering</button>
+<button onclick="loadClusters()">Clusters</button>
+<span class="pill">Verify → PATCH /products · Merge/split → /clusters</span>
+</header>
+<div class="grid" id="grid"></div>
+<script>
+const API='/api/v1';
+async function loadProducts(){
+  const s=document.getElementById('fStatus').value, c=document.getElementById('fCat').value;
+  const q=new URLSearchParams({limit:'200'}); if(s)q.set('status',s); if(c)q.set('category',c);
+  const r=await fetch(`${API}/products?${q}`); const j=await r.json();
+  const g=document.getElementById('grid'); g.innerHTML='';
+  const sum=await (await fetch(`${API}/products/queue/summary`)).json();
+  document.getElementById('summary').textContent=`${sum.needs_review} need review / ${sum.total} total`;
+  j.items.forEach(p=>{
+    const d=document.createElement('div'); d.className='card';
+    d.innerHTML=`<div class="meta"><b>${p.image_id}</b><br>${p.category||'?'} · ${p.status} · conf ${(p.confidence||0).toFixed(2)}<br>cluster: ${p.cluster_id||'-'} · ${p.source_pdf||''} p${p.page_number??''}</div>
+    <div class="row">${['Office Furniture','Villa Furniture','Chandelier'].map(c=>`<button onclick="verify('${p.image_id}','${c}')">${c.split(' ')[0]}</button>`).join('')}</div>
+    <div class="row"><button onclick="similar('${p.image_id}')">Find similar</button></div>
+    <div class="meta" id="sim-${p.image_id}"></div>`;
+    g.appendChild(d);
+  });
+}
+async function verify(id,cat){await fetch(`${API}/products/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({category:cat,status:'classified'})});loadProducts();}
+async function runClustering(){await fetch(`${API}/clusters/run`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({threshold:0.92})});loadClusters();}
+async function loadClusters(){
+  const r=await fetch(`${API}/clusters`); const j=await r.json();
+  const g=document.getElementById('grid'); g.innerHTML='';
+  document.getElementById('summary').textContent=`${j.count} clusters`;
+  j.clusters.forEach(c=>{
+    const d=document.createElement('div'); d.className='card';
+    d.innerHTML=`<div class="meta"><b>${c.cluster_id}</b> · size ${c.size}<br>rep: ${c.representative_id}<br>${c.member_ids.slice(0,8).join(', ')}${c.member_ids.length>8?' …':''}</div>
+    <div class="row"><button onclick="splitPrompt('${c.cluster_id}')">Split</button></div>`;
+    g.appendChild(d);
+  });
+}
+async function splitPrompt(cid){
+  const raw=prompt('Split members into groups, one group per line, ids comma-separated:'); if(!raw)return;
+  const groups=raw.split('\n').map(l=>l.split(',').map(s=>s.trim()).filter(Boolean)).filter(g=>g.length);
+  await fetch(`${API}/clusters/${cid}/split`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({groups})});loadClusters();
+}
+async function similar(id){
+  const r=await fetch(`${API}/search/similar?image_id=${encodeURIComponent(id)}&top_k=6`); const j=await r.json();
+  document.getElementById('sim-'+id).textContent=j.results.map(h=>`${h.image_id} (${h.score})`).join(', ')||'no matches';
+}
+loadProducts();
+</script></body></html>

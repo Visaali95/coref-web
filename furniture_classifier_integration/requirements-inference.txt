@@ -1,0 +1,22 @@
+# Minimal runtime requirements for deploying the trained model + API only.
+# Clustering/search need scikit-learn (free, CPU). timm is optional:
+# with timm, embeddings reuse the fine-tuned backbone; without it the
+# histogram fallback is used.
+
+torch>=2.2.0
+torchvision>=0.17.0
+
+numpy>=1.26.0
+scikit-learn>=1.4.0
+pillow>=10.2.0
+opencv-python-headless>=4.9.0
+PyMuPDF>=1.24.0
+ImageHash>=4.3.1
+
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+python-dotenv>=1.0.0
+PyYAML>=6.0.1

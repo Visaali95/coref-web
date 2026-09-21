@@ -19,6 +19,14 @@ build/
 backend/prisma/dev.db
 backend/prisma/dev.db-journal
 
+# Uploads & Archives
+backend/uploads/
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+
 # Environment variables
 .env
 .env.*

@@ -1,0 +1,20 @@
+{
+  "classes": [
+    "Chandelier",
+    "Office Furniture",
+    "Villa Furniture"
+  ],
+  "class_to_idx": {
+    "Chandelier": 0,
+    "Office Furniture": 1,
+    "Villa Furniture": 2
+  },
+  "idx_to_class": {
+    "0": "Chandelier",
+    "1": "Office Furniture",
+    "2": "Villa Furniture"
+  },
+  "model_name": "efficientnet_b0",
+  "image_size": 224,
+  "num_classes": 3
+}

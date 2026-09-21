@@ -3,10 +3,11 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { parsePdfBuffer } from "../services/pdfService";
+import { classifyPdfWithMLService } from "../services/classifierService";
 
 const router = Router();
 
-// ─── PDF upload (memory storage, passed to pdfService) ────────────────────────
+// ─── PDF upload (memory storage, passed to pdfService + ML classifier) ────────
 const pdfUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 },
@@ -17,10 +18,38 @@ router.post("/pdf", pdfUpload.single("file"), async (req, res) => {
   if (!file) return res.status(400).json({ message: "PDF file is required" });
 
   try {
-    const suggestions = await parsePdfBuffer(file.buffer, file.originalname);
-    res.json({ suggestions });
+    // ── Step 1: Call the ML classifier service (runs in parallel with page rendering) ──
+    // classifyPdfWithMLService never throws — it returns { status: "unavailable" }
+    // on connection errors so the rest of the pipeline degrades gracefully.
+    const mlResult = await classifyPdfWithMLService(file.buffer, file.originalname);
+
+    // Build a per-page classification map for parsePdfBuffer.
+    // undefined = ML service was unavailable → pixel heuristic will be used instead.
+    const mlByPage =
+      mlResult.status === "ok"
+        ? mlResult.byPage
+        : undefined;
+
+    if (mlResult.status !== "ok") {
+      console.warn(
+        `[upload/pdf] ML service ${mlResult.status}: ${mlResult.reason}. ` +
+          "Using pixel-stats heuristic classifier as fallback."
+      );
+    }
+
+    // ── Step 2: Extract images + assign categories ──────────────────────────
+    const suggestions = await parsePdfBuffer(file.buffer, file.originalname, mlByPage);
+
+    // ── Step 3: Attach classifier provenance info to the response ───────────
+    res.json({
+      suggestions,
+      classifierUsed: mlResult.status === "ok" ? "ml" : "heuristic",
+      ...(mlResult.status === "ok" && {
+        mlSummary: mlResult.summary,
+      }),
+    });
   } catch (error) {
-    console.error(error);
+    console.error("[upload/pdf] Unhandled error:", error);
     res.status(500).json({ message: "Failed to parse PDF" });
   }
 });

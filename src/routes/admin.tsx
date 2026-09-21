@@ -92,6 +92,24 @@ type PdfSuggestion = {
   fobPrice?: string;
   leadTime?: string;
   imageUrl?: string | null;
+  /** Raw ML model label e.g. "Office Furniture" */
+  mlLabel?: string;
+  /** 0–1 confidence from the model */
+  mlConfidence?: number;
+  /** "classified" | "needs_review" | "failed" | "heuristic" */
+  mlStatus?: string;
+};
+
+type UploadApiResponse = {
+  suggestions: PdfSuggestion[];
+  /** "ml" when the Python classifier ran, "heuristic" when it fell back */
+  classifierUsed?: "ml" | "heuristic";
+  mlSummary?: {
+    totalPages: number;
+    imagesClassified: number;
+    needsReview: number;
+    byCategory: Record<string, number>;
+  };
 };
 
 // ─── Status badge helpers ──────────────────────────────────────────────────────
@@ -281,6 +299,40 @@ function Login({ onSubmit }: { onSubmit: () => void }) {
   );
 }
 
+// ─── ML Confidence Badge ───────────────────────────────────────────────────────
+function MLConfidenceBadge({ confidence, status }: { confidence?: number; status?: string }) {
+  if (!confidence && status !== "needs_review") return null;
+
+  if (status === "heuristic" || status === "failed") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-secondary text-mutedink">
+        Heuristic
+      </span>
+    );
+  }
+
+  if (status === "needs_review") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-gold/20 text-gold">
+        <AlertCircle className="h-3 w-3" /> Review
+      </span>
+    );
+  }
+
+  const pct = confidence !== undefined ? Math.round(confidence * 100) : null;
+  const isHigh = pct !== null && pct >= 80;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+        isHigh ? "bg-green/15 text-green" : "bg-gold/20 text-gold"
+      }`}
+    >
+      {isHigh ? <CheckCircle className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
+      {pct}%
+    </span>
+  );
+}
+
 // ─── Upload Catalogue Page ─────────────────────────────────────────────────────
 function UploadPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -290,6 +342,8 @@ function UploadPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [defaultCategory, setDefaultCategory] = useState(CATEGORIES[0]);
+  const [classifierUsed, setClassifierUsed] = useState<"ml" | "heuristic" | null>(null);
+  const [mlSummary, setMlSummary] = useState<UploadApiResponse["mlSummary"] | null>(null);
   const queryClient = useQueryClient();
 
   const uploadMutation = useMutation({
@@ -302,25 +356,33 @@ function UploadPage() {
         const text = await response.text();
         throw new Error(text || "Upload failed.");
       }
-      return response.json() as Promise<{ suggestions: PdfSuggestion[] }>;
+      return response.json() as Promise<UploadApiResponse>;
     },
     onMutate: () => {
       setStage("uploading");
       setError(null);
+      setClassifierUsed(null);
+      setMlSummary(null);
     },
     onSuccess: (data) => {
-      const nextRows = data.suggestions.map((suggestion, index) => ({
-        id: index + 1,
-        name: suggestion.name,
-        // Use pixel-classified category if present, otherwise fall back to defaultCategory
-        category: suggestion.category || defaultCategory,
-        supplier: suggestion.supplier ?? "",
-        fobPrice: suggestion.fobPrice ?? "",
-        leadTime: suggestion.leadTime ?? "",
-        imageUrl: suggestion.imageUrl ?? null,
-        status: "Draft",
-      }));
-      setRows(nextRows);
+      setClassifierUsed(data.classifierUsed ?? "heuristic");
+      setMlSummary(data.mlSummary ?? null);
+      const nextRows: (UploadRow & { mlLabel?: string; mlConfidence?: number; mlStatus?: string })[] =
+        data.suggestions.map((suggestion, index) => ({
+          id: index + 1,
+          name: suggestion.name,
+          // ML-classified category takes priority; fall back to defaultCategory
+          category: suggestion.category || defaultCategory,
+          supplier: suggestion.supplier ?? "",
+          fobPrice: suggestion.fobPrice ?? "",
+          leadTime: suggestion.leadTime ?? "",
+          imageUrl: suggestion.imageUrl ?? null,
+          status: "Draft",
+          mlLabel: suggestion.mlLabel,
+          mlConfidence: suggestion.mlConfidence,
+          mlStatus: suggestion.mlStatus,
+        }));
+      setRows(nextRows as UploadRow[]);
       setSelected(new Set(nextRows.map((row) => row.id)));
       setStage("review");
     },
@@ -438,13 +500,14 @@ function UploadPage() {
       {stage === "uploading" && (
         <div className="mt-10 max-w-2xl rounded-xl border border-border bg-white p-10 text-center">
           <Loader2 className="mx-auto h-10 w-10 animate-spin text-navy" />
-          <div className="mt-4 font-display text-lg font-bold text-navy">Extracting products from PDF…</div>
+          <div className="mt-4 font-display text-lg font-bold text-navy">Processing PDF with AI classifier…</div>
           <div className="mt-6 h-2 w-full overflow-hidden rounded-full bg-offwhite">
             <div className="h-full w-full bg-gradient-to-r from-ocean to-navy animate-pulse" />
           </div>
-          <div className="mt-4 text-sm text-charcoal">Reading document text. If this is a scanned PDF, OCR will run automatically — this may take up to 30 seconds.</div>
+          <div className="mt-3 text-sm text-charcoal">Extracting product images and running the furniture classifier model…</div>
+          <div className="mt-2 text-xs text-charcoal opacity-75">If the PDF is scanned, OCR will run automatically. This may take up to 60 seconds.</div>
           <div className="mt-3 flex items-center justify-center gap-2 text-xs text-mutedink">
-            <FileText className="h-3.5 w-3.5" /> Hybrid OCR engine active
+            <FileText className="h-3.5 w-3.5" /> EfficientNet-B0 · OCR fallback · hybrid engine
           </div>
         </div>
       )}
@@ -456,8 +519,39 @@ function UploadPage() {
               <h2 className="font-display text-xl font-extrabold text-navy">Review extracted products</h2>
               <p className="mt-1 text-sm text-mutedink">Edit fields before publishing them to the live catalogue.</p>
             </div>
-            <div className="text-xs font-mono-data text-mutedink">{selected.size} of {rows.length} selected</div>
+            <div className="flex items-center gap-3">
+              {classifierUsed && (
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold ${
+                    classifierUsed === "ml"
+                      ? "bg-green/15 text-green"
+                      : "bg-gold/20 text-gold"
+                  }`}
+                >
+                  {classifierUsed === "ml" ? (
+                    <><CheckCircle className="h-3.5 w-3.5" /> AI Classifier active</>
+                  ) : (
+                    <><AlertCircle className="h-3.5 w-3.5" /> Heuristic mode (start ML service) — <span className="font-mono">localhost:8000</span></>
+                  )}
+                </span>
+              )}
+              <div className="text-xs font-mono-data text-mutedink">{selected.size} of {rows.length} selected</div>
+            </div>
           </div>
+          {mlSummary && classifierUsed === "ml" && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {Object.entries(mlSummary.byCategory).map(([cat, count]) => (
+                <span key={cat} className="rounded-full border border-border bg-white px-2.5 py-1 text-[11px] font-medium text-charcoal">
+                  {cat}: <strong>{count}</strong>
+                </span>
+              ))}
+              {mlSummary.needsReview > 0 && (
+                <span className="rounded-full border border-gold/30 bg-gold/10 px-2.5 py-1 text-[11px] font-medium text-gold">
+                  <AlertCircle className="inline h-3 w-3" /> {mlSummary.needsReview} need manual review
+                </span>
+              )}
+            </div>
+          )}
 
           <div className="mt-5 overflow-hidden rounded-xl border border-border bg-white">
             <div className="overflow-x-auto">
@@ -471,12 +565,18 @@ function UploadPage() {
                     <th className="px-3 py-2">Supplier</th>
                     <th className="px-3 py-2">FOB Price</th>
                     <th className="px-3 py-2">Lead Time</th>
+                    <th className="px-3 py-2">AI Confidence</th>
                     <th className="px-3 py-2">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row) => (
-                    <tr key={row.id} className="border-t border-border align-middle">
+                  {(rows as (UploadRow & { mlLabel?: string; mlConfidence?: number; mlStatus?: string })[]).map((row) => (
+                    <tr
+                      key={row.id}
+                      className={`border-t border-border align-middle ${
+                        row.mlStatus === "needs_review" ? "bg-gold/5" : ""
+                      }`}
+                    >
                       <td className="px-3 py-2"><input type="checkbox" checked={selected.has(row.id)} onChange={() => toggleItem(row.id)} /></td>
                       <td className="px-3 py-2">
                         {row.imageUrl ? (
@@ -485,7 +585,14 @@ function UploadPage() {
                           <div className="h-9 w-12 rounded bg-secondary grid place-items-center text-[10px] text-mutedink font-medium">No img</div>
                         )}
                       </td>
-                      <td className="px-3 py-2"><input value={row.name} onChange={(event) => handleRowChange(row.id, "name", event.target.value)} className="w-72 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-col gap-0.5">
+                          <input value={row.name} onChange={(event) => handleRowChange(row.id, "name", event.target.value)} className="w-72 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" />
+                          {row.mlLabel && (
+                            <span className="ml-2 text-[9px] text-mutedink font-mono">ML: {row.mlLabel}</span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-3 py-2">
                         <select
                           value={row.category}
@@ -500,6 +607,9 @@ function UploadPage() {
                       <td className="px-3 py-2"><input value={row.supplier} onChange={(event) => handleRowChange(row.id, "supplier", event.target.value)} className="w-40 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
                       <td className="px-3 py-2"><input value={row.fobPrice} onChange={(event) => handleRowChange(row.id, "fobPrice", event.target.value)} className="w-24 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
                       <td className="px-3 py-2"><input value={row.leadTime} onChange={(event) => handleRowChange(row.id, "leadTime", event.target.value)} className="w-28 rounded border border-transparent bg-transparent px-2 py-1 hover:border-input focus:border-ocean focus:bg-white focus:outline-none" /></td>
+                      <td className="px-3 py-2">
+                        <MLConfidenceBadge confidence={row.mlConfidence} status={row.mlStatus} />
+                      </td>
                       <td className="px-3 py-2"><span className="rounded bg-secondary/10 px-2 py-0.5 text-[10px] font-semibold text-navy">{row.status}</span></td>
                     </tr>
                   ))}

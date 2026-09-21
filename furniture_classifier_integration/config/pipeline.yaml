@@ -1,0 +1,41 @@
+# PDF extraction + deduplication configuration.
+# Loaded by `fml prepare` / `fml pdf`; CLI flags override these values.
+
+extraction:
+dpi: 200 # rasterisation DPI for the region-detection fallback
+save_format: PNG # PNG | JPEG
+jpeg_quality: 92
+max_pages: null
+page_range: null # e.g. [1, 40] (1-based, inclusive)
+extract_embedded: true # primary strategy: embedded bitmap XObjects
+region_fallback: true # rasterise + segment pages that yield no bitmaps
+always_region_scan: false # also segment every page (slower, higher recall)
+capture_text_context: true # store nearby text as a labelling hint (never a label)
+max_images_per_page: 40
+max_side: 2048
+
+# Relevance filter: drops logos, icons, rules, backgrounds and text blocks.
+# Loosen these if too few product images survive; tighten if too much noise gets through.
+filters:
+min_width: 120
+min_height: 120
+min_area: 14400
+max_aspect_ratio: 5.0
+min_file_size_bytes: 3000
+min_std: 8.0
+max_uniform_ratio: 0.92
+min_edge_density: 0.010
+max_edge_density: 0.75
+min_unique_colors: 24
+max_page_area_ratio: 0.96
+max_alpha_transparent_ratio: 0.85
+
+dedup:
+hash_size: 8
+phash_threshold: 6 # 0-64 bits; higher = more aggressive deduplication
+dhash_threshold: 8
+crop_threshold: 6 # centre-crop pHash, catches cropped variants
+use_embeddings: false # CNN-embedding pass for heavy crops/recolours
+embedding_model: mobilenetv3_small_100
+embedding_threshold: 0.94
+embedding_batch_size: 32
